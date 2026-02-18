@@ -1474,8 +1474,31 @@ function RoundResults({ gs, isHost, nextVotingRound, transitioning }) {
 
 // ── Game Over ─────────────────────────────────────────────────────────────────
 function GameOver({ gs, writeGs, pid }) {
+  const rounds = getRounds(gs);
   const sorted=[...gs.players].sort((a,b)=>b.score-a.score);
   const medals=["🥇","🥈","🥉"];
+  const prompts = (gs.prompts || []) as string[];
+  const subs = (gs.submissions || {}) as Record<string, Array<{url:string, preview:string}>>;
+  const plan = getRoundPlan(gs);
+  const playerNameById = new Map<string, string>(
+    ((gs.players || []) as Array<{ id: string; nickname: string }>).map((p) => [p.id, p.nickname])
+  );
+  const summaryRows = (plan.length ? plan.map((entry, idx) => ({
+    idx,
+    cycle: (entry?.cycle ?? idx),
+    heat: (entry?.heat ?? 0),
+    heatsInCycle: (entry?.heatsInCycle ?? 1),
+    participants: (entry?.participants || []) as string[],
+    prompt: prompts[idx] || "",
+  })) : prompts.map((prompt, idx) => ({
+    idx,
+    cycle: idx,
+    heat: 0,
+    heatsInCycle: 1,
+    participants: (gs.players || []).map(p => p.id),
+    prompt,
+  })));
+
   const playAgain=async()=>{
     // Best-effort: delete all vote keys for this game before resetting
     storage.delPrefix(`gifbattle:vote:${gs.code}:`).catch(()=>{});
@@ -1490,24 +1513,58 @@ function GameOver({ gs, writeGs, pid }) {
     });
   };
   return(
-    <div style={g.page}>
-      <div style={g.card}>
+    <div style={g.pageTop}>
+      <div style={{...g.wCard,marginTop:20}}>
         <div style={{textAlign:"center",marginBottom:20}}>
           <div style={{fontSize:52}}>🎊</div>
           <div style={g.h1}>Game Over!</div>
           <div style={{color:C.yellow,fontWeight:700,fontSize:18,marginTop:4}}>{sorted[0]?.nickname} wins!</div>
         </div>
-        {sorted.map((p,i)=>(
-          <div key={p.id} style={{...g.pRow,background:i===0?"#f7258514":C.card2,borderLeft:i===0?`3px solid ${C.accent}`:"3px solid transparent"}}>
-            <div style={g.row}>
-              <span style={{fontSize:20}}>{medals[i]||"🎖"}</span>
-              <span style={{fontWeight:i===0?800:500}}>{p.nickname}</span>
-              {p.id===pid&&<span style={{...g.badge,background:"#7209b722",color:"#b060ff",fontSize:10}}>YOU</span>}
+        <div style={{marginBottom:18}}>
+          {sorted.map((p,i)=>(
+            <div key={p.id} style={{...g.pRow,background:i===0?"#f7258514":C.card2,borderLeft:i===0?`3px solid ${C.accent}`:"3px solid transparent"}}>
+              <div style={g.row}>
+                <span style={{fontSize:20}}>{medals[i]||"🎖"}</span>
+                <span style={{fontWeight:i===0?800:500}}>{p.nickname}</span>
+                {p.id===pid&&<span style={{...g.badge,background:"#7209b722",color:"#b060ff",fontSize:10}}>YOU</span>}
+              </div>
+              <span style={{fontWeight:800,color:i===0?C.accent:C.text}}>{p.score} pts</span>
             </div>
-            <span style={{fontWeight:800,color:i===0?C.accent:C.text}}>{p.score} pts</span>
+          ))}
+        </div>
+
+        <div style={{background:C.card2,borderRadius:12,padding:"14px 16px",marginBottom:18}}>
+          <div style={{fontSize:11,color:C.muted,letterSpacing:2,marginBottom:10}}>GAME SUMMARY</div>
+          <div style={{fontSize:12,color:C.muted,marginBottom:12}}>
+            {`${summaryRows.length} heat${summaryRows.length!==1?"s":""} played across ${rounds} round${rounds!==1?"s":""}`}
           </div>
-        ))}
-        <button style={{...g.btn,...g.btnP,marginTop:18}} onClick={playAgain}>🔄 Play Again</button>
+          {summaryRows.map(row => (
+            <div key={row.idx} style={{background:`${C.bg}88`,borderRadius:10,padding:"12px 12px 10px",marginBottom:10}}>
+              <div style={{fontSize:12,color:C.muted,marginBottom:6}}>
+                {`Round ${row.cycle + 1}/${rounds} · Heat ${row.heat + 1}/${row.heatsInCycle}`}
+              </div>
+              <div style={{fontSize:16,fontWeight:700,marginBottom:10,color:"#fff"}}>
+                "{row.prompt || "No prompt"}"
+              </div>
+              <div style={{display:"grid",gridTemplateColumns:"repeat(2,minmax(0,1fr))",gap:10}}>
+                {row.participants.map((playerId) => {
+                  const sub = subs[playerId]?.[row.idx];
+                  const nick = playerNameById.get(playerId) || "Player";
+                  return (
+                    <div key={`${row.idx}-${playerId}`} style={{background:C.card,borderRadius:8,padding:"8px"}}>
+                      <div style={{fontSize:12,fontWeight:700,marginBottom:6}}>{nick}</div>
+                      {sub?.url
+                        ? <GifImg url={sub.url} style={{height:130,borderRadius:6}} fit="cover"/>
+                        : <div style={{height:130,background:C.card2,borderRadius:6,display:"flex",alignItems:"center",justifyContent:"center",color:C.muted,fontSize:12}}>No GIF</div>}
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          ))}
+        </div>
+
+        <button style={{...g.btn,...g.btnP,marginBottom:0}} onClick={playAgain}>🔄 Play Again</button>
       </div>
     </div>
   );
