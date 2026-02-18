@@ -380,6 +380,28 @@ const getAssignedRoundIndexes = (state, playerId: string) => {
 const countSubmittedRounds = (arr: Array<{url:string, preview:string}> | undefined, indexes: number[]) =>
   indexes.reduce((sum, ri) => sum + (arr?.[ri] ? 1 : 0), 0);
 
+const getEligibleForRound = (state, roundIndex: number) => {
+  const subs = (state?.submissions || {}) as Record<string, Array<{url:string, preview:string}>>;
+  return Object.entries(subs)
+    .filter(([, arr]) => arr?.[roundIndex] != null)
+    .map(([id]) => id);
+};
+
+const findNextVotableRound = (state, startIndex: number) => {
+  const total = getTotalVotingRounds(state);
+  for (let i = Math.max(0, startIndex); i < total; i++) {
+    if (getEligibleForRound(state, i).length >= 2) return i;
+  }
+  return null;
+};
+
+const buildMatchupsFromEligible = (eligible: string[]) => {
+  const shuffled = [...eligible].sort(() => Math.random() - 0.5);
+  const matchups: [string, string][] = [];
+  for (let i = 0; i + 1 < shuffled.length; i += 2) matchups.push([shuffled[i], shuffled[i+1]]);
+  return matchups;
+};
+
 // Each browser tab gets a unique ID (module-level, not React state)
 const TAB_ID = Math.random().toString(36).slice(2, 10);
 
@@ -586,31 +608,24 @@ export default function App() {
   };
 
   const transitionToVoting = async (state) => {
-    const vRound = state.votingRound ?? 0;
-    const subs = state.submissions as Record<string, Array<{url:string, preview:string}>>;
-    const eligible = Object.entries(subs)
-      .filter(([, arr]) => arr[vRound] != null)
-      .map(([id]) => id);
-
-    if (eligible.length < 2) {
-      await writeGs({ ...state, phase:"round_results", matchups:[], roundMatchupWins:{} });
+    const vRound = findNextVotableRound(state, state.votingRound ?? 0);
+    if (vRound == null) {
+      await writeGs({ ...state, phase:"game_over" });
       return;
     }
+    const eligible = getEligibleForRound(state, vRound);
 
     // 2-player game — everyone is a contestant, auto-tie
     if (state.players.length <= 2) {
       const rwins: Record<string, number> = {};
       eligible.forEach(id => { rwins[id] = 1; });
       const players = state.players.map(p => ({ ...p, score: p.score + (eligible.includes(p.id) ? 1 : 0) }));
-      await writeGs({ ...state, phase:"round_results", players, matchups:[[eligible[0], eligible[1]]], roundMatchupWins:rwins });
+      await writeGs({ ...state, votingRound:vRound, phase:"round_results", players, matchups:[[eligible[0], eligible[1]]], roundMatchupWins:rwins });
       return;
     }
 
-    // Normal: pair all eligible competitors for this heat.
-    const shuffled = [...eligible].sort(() => Math.random() - 0.5);
-    const matchups: [string, string][] = [];
-    for (let i = 0; i + 1 < shuffled.length; i += 2) matchups.push([shuffled[i], shuffled[i+1]]);
-    await writeGs({ ...state, phase:"voting", matchups, currentMatchup:0, roundMatchupWins:{}, voteDeadline:Date.now()+(state.voteSecs??VOTE_SECS)*1000 });
+    const matchups = buildMatchupsFromEligible(eligible);
+    await writeGs({ ...state, votingRound:vRound, phase:"voting", matchups, currentMatchup:0, roundMatchupWins:{}, voteDeadline:Date.now()+(state.voteSecs??VOTE_SECS)*1000 });
   };
 
   const advanceMatchup = async (state) => {
@@ -637,36 +652,20 @@ export default function App() {
 
   const nextVotingRound = async () => {
     const fresh = await fetchGs() || gs;
-    const totalRounds = getTotalVotingRounds(fresh);
-    let nextVR = (fresh.votingRound ?? 0) + 1;
+    const nextVR = findNextVotableRound(fresh, (fresh.votingRound ?? 0) + 1);
+    if (nextVR == null) return writeGs({ ...fresh, phase:"game_over" });
+    const eligible = getEligibleForRound(fresh, nextVR);
 
-    while (nextVR < totalRounds) {
-      const subs = fresh.submissions as Record<string, Array<{url:string, preview:string}>>;
-      const eligible = Object.entries(subs)
-        .filter(([, arr]) => arr[nextVR] != null)
-        .map(([id]) => id);
-
-      if (eligible.length < 2) {
-        nextVR += 1;
-        continue;
-      }
-
-      if (fresh.players.length <= 2) {
-        const rwins: Record<string, number> = {};
-        eligible.forEach(id => { rwins[id] = 1; });
-        const players = fresh.players.map(p => ({ ...p, score: p.score + (eligible.includes(p.id) ? 1 : 0) }));
-        await writeGs({ ...fresh, votingRound:nextVR, phase:"round_results", players, matchups:[[eligible[0], eligible[1]]], roundMatchupWins:rwins });
-        return;
-      }
-
-      const shuffled = [...eligible].sort(() => Math.random() - 0.5);
-      const matchups: [string, string][] = [];
-      for (let i = 0; i + 1 < shuffled.length; i += 2) matchups.push([shuffled[i], shuffled[i+1]]);
-      await writeGs({ ...fresh, votingRound:nextVR, phase:"voting", matchups, currentMatchup:0, roundMatchupWins:{}, voteDeadline:Date.now()+(fresh.voteSecs??VOTE_SECS)*1000 });
+    if (fresh.players.length <= 2) {
+      const rwins: Record<string, number> = {};
+      eligible.forEach(id => { rwins[id] = 1; });
+      const players = fresh.players.map(p => ({ ...p, score: p.score + (eligible.includes(p.id) ? 1 : 0) }));
+      await writeGs({ ...fresh, votingRound:nextVR, phase:"round_results", players, matchups:[[eligible[0], eligible[1]]], roundMatchupWins:rwins });
       return;
     }
 
-    await writeGs({ ...fresh, phase:"game_over" });
+    const matchups = buildMatchupsFromEligible(eligible);
+    await writeGs({ ...fresh, votingRound:nextVR, phase:"voting", matchups, currentMatchup:0, roundMatchupWins:{}, voteDeadline:Date.now()+(fresh.voteSecs??VOTE_SECS)*1000 });
   };
 
   const sp = { gs, pid, code, isHost, apiKey, writeGs, fetchGs, transitioning, transitionToVoting, advanceMatchup, startGame, nextVotingRound, leave };
