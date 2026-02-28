@@ -7,8 +7,8 @@
     "start": "next start"
   },
   "dependencies": {
-    "@anthropic-ai/sdk": "^0.76.0",
     "@upstash/redis": "^1.36.2",
+    "@vercel/blob": "^2.3.0",
     "next": "^14",
     "react": "^18",
     "react-dom": "^18"
