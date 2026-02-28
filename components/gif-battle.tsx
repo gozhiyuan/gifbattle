@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useRef, useCallback, CSSProperties } from "react";
+import React, { useState, useEffect, useRef, useCallback, useContext, CSSProperties } from "react";
 
 const POLL_MS = 2000;
 const DEFAULT_ROUNDS = 3;    // prompts each player submits for
@@ -408,6 +408,7 @@ const TAB_ID = Math.random().toString(36).slice(2, 10);
 const genCode = () => Math.random().toString(36).slice(2, 6).toUpperCase();
 const rKey = c => `gifbattle:room:${c}`;
 const vKey = (c, round, mi, pid) => `gifbattle:vote:${c}:${round}:${mi}:${pid}`;
+const hbKey = c => `gifbattle:hb:${c}`;
 
 // ── KV storage shim — calls /api/store instead of window.storage ──────────────
 const storage = {
@@ -432,53 +433,93 @@ const storage = {
 };
 
 // ── Giphy search ───────────────────────────────────────────────────────────────
-async function searchGifs(q, apiKey, offset = 0) {
-  if (!q.trim() || !apiKey) return [];
+type GifSearchResult = {
+  items: Array<{id:string,url:string,preview:string}>;
+  error: string | null;
+};
+
+async function searchGifs(q, apiKey, offset = 0): Promise<GifSearchResult> {
+  if (!q.trim() || !apiKey) return { items: [], error: null };
   try {
     const r = await fetch(
       `https://api.giphy.com/v1/gifs/search?api_key=${apiKey}&q=${encodeURIComponent(q)}&limit=12&offset=${offset}&rating=pg-13`
     );
-    if (!r.ok) return [];
+    if (r.status === 429) {
+      return { items: [], error: "Rate limit reached. Please wait a minute and try again." };
+    }
+    if (!r.ok) {
+      return { items: [], error: "GIPHY search failed. Please try again." };
+    }
     const d = await r.json();
-    return (d.data || []).map(g => ({
+    const items = (d.data || []).map(g => ({
       id: g.id,
       url: g.images?.fixed_height?.url || "",
       preview: g.images?.fixed_height_small?.url || g.images?.fixed_height?.url || "",
     })).filter(g => g.url);
-  } catch(e) { console.error(e); return []; }
+    return { items, error: null };
+  } catch(e) {
+    console.error(e);
+    return { items: [], error: "Network error while searching GIPHY." };
+  }
 }
 
 // ── Styles ────────────────────────────────────────────────────────────────────
-const C = { bg:"#0d0d1a", card:"#16162a", card2:"#1e1e38", accent:"#f72585", text:"#e0e0ff", muted:"#6060a0", green:"#06d6a0", yellow:"#ffd166" };
-const g: Record<string, CSSProperties> = {
-  page: { minHeight:"100vh", background:C.bg, color:C.text, fontFamily:"'Segoe UI',system-ui,sans-serif", display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"center", padding:"20px", boxSizing:"border-box" },
-  pageTop: { minHeight:"100vh", background:C.bg, color:C.text, fontFamily:"'Segoe UI',system-ui,sans-serif", display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"flex-start", padding:"20px 20px 40px", boxSizing:"border-box" },
-  card: { background:C.card, borderRadius:20, padding:"24px 28px", width:"100%", maxWidth:500, boxShadow:"0 8px 40px rgba(0,0,0,0.5)" },
-  wCard: { background:C.card, borderRadius:20, padding:"24px 28px", width:"100%", maxWidth:820, boxShadow:"0 8px 40px rgba(0,0,0,0.5)" },
-  h1: { fontSize:34, fontWeight:900, margin:"0 0 6px", background:"linear-gradient(135deg,#f72585,#7209b7)", WebkitBackgroundClip:"text", WebkitTextFillColor:"transparent" },
-  h2: { fontSize:22, fontWeight:800, margin:"0 0 14px" },
-  sub: { color:C.muted, marginBottom:20, fontSize:14 },
-  inp: { width:"100%", padding:"12px 16px", borderRadius:10, border:`1px solid ${C.muted}44`, background:C.card2, color:C.text, fontSize:15, boxSizing:"border-box", marginBottom:10, outline:"none" },
-  btn: { padding:"13px 24px", borderRadius:10, border:"none", cursor:"pointer", fontSize:15, fontWeight:700, display:"block", width:"100%", marginBottom:10 },
-  btnP: { background:"linear-gradient(135deg,#f72585,#7209b7)", color:"#fff" },
+const DARK = { bg:"#07070e", card:"#0d0d1e", card2:"#13132a", accent:"#ff2979", cyan:"#00e5ff", text:"#eaeaff", muted:"#484878", green:"#00ff88", yellow:"#ffcc00" };
+const LIGHT = { bg:"#f7f7ff", card:"#ffffff", card2:"#eeeef8", accent:"#e8005a", cyan:"#007aa8", text:"#1a1a30", muted:"#6b6b8f", green:"#007a3d", yellow:"#b38000" };
+const FONT_DISPLAY = "'Bebas Neue', sans-serif";
+const FONT_MONO = "'Space Mono', monospace";
+const FONT_BODY = "'DM Sans', system-ui, sans-serif";
+const makeStyles = (C: typeof DARK): Record<string, CSSProperties> => ({
+  page: { minHeight:"100vh", background:C.bg, color:C.text, fontFamily:FONT_BODY, display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"center", padding:"20px" },
+  pageTop: { minHeight:"100vh", background:C.bg, color:C.text, fontFamily:FONT_BODY, display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"flex-start", padding:"20px 20px 40px" },
+  card: { background:C.card, borderRadius:16, padding:"28px 32px", width:"100%", maxWidth:500, boxShadow:`0 0 0 1px ${C.muted}28, 0 28px 70px rgba(0,0,0,0.7)`, border:`1px solid ${C.muted}28` },
+  wCard: { background:C.card, borderRadius:16, padding:"28px 32px", width:"100%", maxWidth:820, boxShadow:`0 0 0 1px ${C.muted}28, 0 28px 70px rgba(0,0,0,0.7)`, border:`1px solid ${C.muted}28` },
+  h1: { fontSize:52, fontWeight:900, margin:"0 0 4px", fontFamily:FONT_DISPLAY, letterSpacing:3, background:`linear-gradient(135deg, ${C.accent}, #ff8800 50%, ${C.accent})`, WebkitBackgroundClip:"text", WebkitTextFillColor:"transparent", lineHeight:1 },
+  h2: { fontSize:28, fontWeight:900, margin:"0 0 14px", fontFamily:FONT_DISPLAY, letterSpacing:2, color:C.text },
+  sub: { color:C.muted, marginBottom:24, fontSize:14, letterSpacing:0.3 },
+  inp: { width:"100%", padding:"13px 16px", borderRadius:10, border:`1px solid ${C.muted}55`, background:C.card2, color:C.text, fontSize:15, marginBottom:12, outline:"none", fontFamily:FONT_BODY },
+  btn: { padding:"14px 24px", borderRadius:10, border:"none", cursor:"pointer", fontSize:15, fontWeight:700, display:"block", width:"100%", marginBottom:10, fontFamily:FONT_BODY, letterSpacing:0.4 },
+  btnP: { background:`linear-gradient(135deg, ${C.accent}, #c01550)`, color:"#fff", boxShadow:`0 4px 24px ${C.accent}44` },
   btnS: { background:C.card2, color:C.text, border:`1px solid ${C.muted}55` },
-  btnSm: { padding:"8px 16px", borderRadius:8, border:"none", cursor:"pointer", fontSize:13, fontWeight:700 },
-  err: { color:"#f72585", fontSize:13, marginBottom:10, padding:"8px 12px", background:"#f7258511", borderRadius:8 },
-  info: { color:C.muted, fontSize:13, marginBottom:10, padding:"8px 12px", background:C.card2, borderRadius:8 },
-  divider: { textAlign:"center", color:C.muted, margin:"10px 0", fontSize:13 },
+  btnSm: { padding:"8px 14px", borderRadius:8, border:"none", cursor:"pointer", fontSize:13, fontWeight:700, fontFamily:FONT_BODY },
+  err: { color:C.accent, fontSize:13, marginBottom:12, padding:"10px 14px", background:`${C.accent}11`, borderRadius:8, border:`1px solid ${C.accent}33` },
+  info: { color:C.muted, fontSize:13, marginBottom:12, padding:"10px 14px", background:C.card2, borderRadius:8 },
+  divider: { textAlign:"center", color:C.muted, margin:"14px 0", fontSize:13 },
   row: { display:"flex", gap:10, alignItems:"center" },
-  timer: { fontWeight:900, textAlign:"center", lineHeight:1 },
-  prompt: { fontSize:20, fontWeight:700, textAlign:"center", lineHeight:1.4, padding:"14px 0", color:"#fff" },
-  badge: { display:"inline-block", padding:"3px 10px", borderRadius:20, fontSize:11, fontWeight:700 },
-  pRow: { display:"flex", justifyContent:"space-between", alignItems:"center", padding:"10px 14px", background:C.card2, borderRadius:10, marginBottom:8 },
+  timer: { fontWeight:900, textAlign:"center", lineHeight:1, fontFamily:FONT_MONO },
+  prompt: { fontSize:21, fontWeight:600, textAlign:"center", lineHeight:1.5, padding:"16px 0", color:C.text, fontFamily:FONT_BODY },
+  badge: { display:"inline-block", padding:"3px 10px", borderRadius:20, fontSize:10, fontWeight:700, letterSpacing:1 },
+  pRow: { display:"flex", justifyContent:"space-between", alignItems:"center", padding:"11px 14px", background:C.card2, borderRadius:10, marginBottom:8, border:`1px solid ${C.muted}22` },
+});
+
+type ThemeMode = "dark" | "light" | "auto";
+const normalizeThemeMode = (value: string | null): ThemeMode => {
+  if (value === "dark" || value === "light" || value === "auto") return value;
+  return "auto";
 };
+const ThemeCtx = React.createContext<{
+  C: typeof DARK; g: Record<string, CSSProperties>;
+  themeMode: ThemeMode; setThemeMode: (m: ThemeMode) => void;
+}>({ C: DARK, g: makeStyles(DARK), themeMode: "auto", setThemeMode: () => {} });
+
+// ── Powered By GIPHY attribution badge ────────────────────────────────────────
+function PoweredByGiphy() {
+  return (
+    <div style={{display:"flex",justifyContent:"flex-end",marginTop:8}}>
+      <a href="https://giphy.com" target="_blank" rel="noreferrer">
+        <img src="/powered-by-giphy.gif" alt="Powered By GIPHY" style={{height:18,display:"block"}}/>
+      </a>
+    </div>
+  );
+}
 
 // ── GIF image with loading/error state ────────────────────────────────────────
-function GifImg({ url, style={}, fit="cover" }) {
+function GifImg({ url, style={}, fit="cover", className="" }) {
+  const { C } = useContext(ThemeCtx);
   const [ok, setOk] = useState(false);
   const [err, setErr] = useState(false);
   return (
-    <div style={{ position:"relative", background:C.card2, overflow:"hidden", ...style }}>
+    <div className={className} style={{ position:"relative", background:C.card2, overflow:"hidden", ...style }}>
       {!ok && !err && <div style={{position:"absolute",inset:0,display:"flex",alignItems:"center",justifyContent:"center",color:C.muted,fontSize:12}}>Loading…</div>}
       {err && <div style={{position:"absolute",inset:0,display:"flex",alignItems:"center",justifyContent:"center",color:C.muted,fontSize:12}}>GIF unavailable</div>}
       <img src={url} alt="" onLoad={()=>setOk(true)} onError={()=>setErr(true)}
@@ -490,9 +531,35 @@ function GifImg({ url, style={}, fit="cover" }) {
 // ── App root ──────────────────────────────────────────────────────────────────
 export default function App() {
   const pid = TAB_ID;
+  const [themeMode, setThemeMode] = useState<ThemeMode>(() => {
+    if (typeof window === "undefined") return "auto";
+    return normalizeThemeMode(localStorage.getItem("gifbattle_theme"));
+  });
+  const [sysDark, setSysDark] = useState(() =>
+    typeof window !== "undefined" && window.matchMedia("(prefers-color-scheme: dark)").matches
+  );
+  useEffect(() => {
+    const mq = window.matchMedia("(prefers-color-scheme: dark)");
+    const handler = (e: MediaQueryListEvent) => setSysDark(e.matches);
+    mq.addEventListener("change", handler);
+    return () => mq.removeEventListener("change", handler);
+  }, []);
+  const setAndSaveTheme = (m: ThemeMode) => {
+    const nextMode = normalizeThemeMode(m);
+    localStorage.setItem("gifbattle_theme", nextMode);
+    setThemeMode(nextMode);
+  };
+  const isDark = themeMode === "auto" ? sysDark : themeMode === "dark";
+  useEffect(() => {
+    const resolvedTheme = isDark ? "dark" : "light";
+    document.documentElement.dataset.theme = resolvedTheme;
+    document.documentElement.style.colorScheme = resolvedTheme;
+  }, [isDark]);
+  const C = isDark ? DARK : LIGHT;
+  const g = makeStyles(C);
+  const themeCtxVal = { C, g, themeMode, setThemeMode: setAndSaveTheme };
   const envKey = typeof process !== "undefined" && process.env?.NEXT_PUBLIC_GIPHY_KEY || "";
-  const [apiKey, setApiKey] = useState(envKey);
-  const [view, setView] = useState(envKey ? "home" : "apikey");
+  const [view, setView] = useState("home");
   const [nick, setNick] = useState("");
   const [code, setCode] = useState("");
   const [joinIn, setJoinIn] = useState("");
@@ -501,6 +568,10 @@ export default function App() {
   const pollRef = useRef(null);
   const transitioning = useRef(false);
   const lastGsJson = useRef<string | null>(null);
+  const gsRef = useRef<any>(null);
+  const isHostRef = useRef(false);
+  const hbIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const hbMissingSinceRef = useRef<number | null>(null);
 
   const fetchGs = useCallback(async (c?: string) => {
     try {
@@ -527,12 +598,73 @@ export default function App() {
     } catch { return null; }
   }, [code]);
 
+  const checkHostMigration = useCallback(async () => {
+    const cur = gsRef.current;
+    if (!cur || cur.phase === "game_over") return;
+    if (isHostRef.current) return;
+    try {
+      const r = await storage.get(hbKey(code));
+      const now = Date.now();
+      let hostAlive = false;
+
+      if (r?.value) {
+        hbMissingSinceRef.current = null;
+        const hb: { ts?: number } = JSON.parse(r.value);
+        hostAlive = typeof hb.ts === "number" && now - hb.ts < 20000;
+      } else {
+        hbMissingSinceRef.current = hbMissingSinceRef.current ?? now;
+        hostAlive = now - hbMissingSinceRef.current < 20000;
+      }
+      if (hostAlive) return;
+
+      // Elect first non-host player as new host
+      const candidates = cur.players.filter((p: { id: string }) => p.id !== cur.host);
+      if (!candidates.length || candidates[0].id !== pid) return; // not my turn
+      // Confirm host hasn't already been migrated (re-fetch to avoid races)
+      const fresh = await fetchGs() || cur;
+      if (fresh.host !== cur.host) return;
+      // Take over: write heartbeat first, then update room state
+      await storage.set(hbKey(code), JSON.stringify({ pid, ts: Date.now() }));
+      await writeGs({ ...fresh, host: pid });
+      hbMissingSinceRef.current = null;
+    } catch {}
+  }, [code, fetchGs, writeGs]);
+
+  // Keep refs in sync so interval callbacks always see current state
+  useEffect(() => {
+    gsRef.current = gs;
+    isHostRef.current = gs?.host === pid;
+  }, [gs]);
+
+  // Write initial heartbeat whenever this client becomes (or remains) host
+  useEffect(() => {
+    if (view === "game" && code && gs?.host === pid) {
+      storage.set(hbKey(code), JSON.stringify({ pid, ts: Date.now() })).catch(() => {});
+    }
+  }, [view, code, gs?.host]);
+
   useEffect(() => {
     if (view === "game" && code) {
       pollRef.current = setInterval(() => fetchGs(), POLL_MS);
-      return () => clearInterval(pollRef.current);
+      // Stagger: host writes heartbeat every 8s starting immediately;
+      // non-hosts check for stale host every 8s starting at 4s offset.
+      const hbDelay = setTimeout(() => {
+        hbIntervalRef.current = setInterval(() => {
+          if (isHostRef.current) {
+            storage.set(hbKey(code), JSON.stringify({ pid, ts: Date.now() })).catch(() => {});
+          } else {
+            checkHostMigration();
+          }
+        }, 8000);
+      }, isHostRef.current ? 0 : 4000);
+      return () => {
+        clearInterval(pollRef.current);
+        clearInterval(hbIntervalRef.current!);
+        hbMissingSinceRef.current = null;
+        clearTimeout(hbDelay);
+      };
     }
-  }, [view, code, fetchGs]);
+  }, [view, code, fetchGs, checkHostMigration]);
 
   // Detect when this player has been kicked from the lobby
   useEffect(() => {
@@ -541,15 +673,24 @@ export default function App() {
     }
   }, [gs]);
 
-  const leave = () => { clearInterval(pollRef.current); setView("home"); setGs(null); setCode(""); setErr(""); };
+  const leave = () => {
+    clearInterval(pollRef.current);
+    clearInterval(hbIntervalRef.current!);
+    hbMissingSinceRef.current = null;
+    setView("home"); setGs(null); setCode(""); setErr("");
+  };
 
-  if (view === "apikey") return (
-    <ApiKeyScreen onSave={k => { setApiKey(k); setView("home"); }} />
+  if (!envKey) return (
+    <ThemeCtx.Provider value={themeCtxVal}>
+      <ThemeToggle />
+      <MissingGiphyConfig />
+    </ThemeCtx.Provider>
   );
 
   if (view === "home") return (
-    <HomeScreen nick={nick} setNick={setNick} joinIn={joinIn} setJoinIn={setJoinIn} err={err} setErr={setErr}
-      onSettings={envKey ? null : () => setView("apikey")}
+    <ThemeCtx.Provider value={themeCtxVal}>
+      <ThemeToggle />
+      <HomeScreen nick={nick} setNick={setNick} joinIn={joinIn} setJoinIn={setJoinIn} err={err} setErr={setErr}
       onCreate={async () => {
         if (!nick.trim()) return setErr("Enter a nickname");
         const c = genCode();
@@ -581,9 +722,15 @@ export default function App() {
         } catch { setErr("Failed to join — check the code"); }
       }}
     />
+    </ThemeCtx.Provider>
   );
 
-  if (!gs) return <div style={g.page}><div style={{color:C.muted}}>Loading…</div></div>;
+  if (!gs) return (
+    <ThemeCtx.Provider value={themeCtxVal}>
+      <ThemeToggle />
+      <div style={g.page}><div style={{color:C.muted}}>Loading…</div></div>
+    </ThemeCtx.Provider>
+  );
 
   const isHost = gs.host === pid;
 
@@ -668,58 +815,76 @@ export default function App() {
     await writeGs({ ...fresh, votingRound:nextVR, phase:"voting", matchups, currentMatchup:0, roundMatchupWins:{}, voteDeadline:Date.now()+(fresh.voteSecs??VOTE_SECS)*1000 });
   };
 
-  const sp = { gs, pid, code, isHost, apiKey, writeGs, fetchGs, transitioning, transitionToVoting, advanceMatchup, startGame, nextVotingRound, leave };
-  return gs.phase==="lobby"?<Lobby {...sp}/>:gs.phase==="submitting"?<Submit {...sp}/>:gs.phase==="voting"?<Voting {...sp}/>:gs.phase==="round_results"?<RoundResults {...sp}/>:gs.phase==="game_over"?<GameOver {...sp}/>:null;
+  const sp = { gs, pid, code, isHost, apiKey: envKey, writeGs, fetchGs, transitioning, transitionToVoting, advanceMatchup, startGame, nextVotingRound, leave };
+  return (
+    <ThemeCtx.Provider value={themeCtxVal}>
+      <ThemeToggle />
+      {gs.phase==="lobby"?<Lobby {...sp}/>:gs.phase==="submitting"?<Submit {...sp}/>:gs.phase==="voting"?<Voting {...sp}/>:gs.phase==="round_results"?<RoundResults {...sp}/>:gs.phase==="game_over"?<GameOver {...sp}/>:null}
+    </ThemeCtx.Provider>
+  );
 }
 
-// ── API Key Screen ────────────────────────────────────────────────────────────
-function ApiKeyScreen({ onSave }) {
-  const [key, setKey] = useState("");
-  const [err, setErr] = useState("");
-  const save = () => {
-    if (!key.trim() || key.trim().length < 10) return setErr("Paste a valid Giphy API key");
-    onSave(key.trim());
-  };
+// ── Theme toggle ──────────────────────────────────────────────────────────────
+function ThemeToggle() {
+  const { themeMode, setThemeMode, C } = useContext(ThemeCtx);
+  const icon: Record<ThemeMode, string> = { dark:"🌙", light:"☀️", auto:"🖥️" };
+  const next: Record<ThemeMode, ThemeMode> = { auto:"dark", dark:"light", light:"auto" };
+  return (
+    <button className="gbtn" title={`Theme: ${themeMode}`}
+      onClick={() => setThemeMode(next[themeMode])}
+      style={{ position:"fixed", bottom:16, right:16, zIndex:1000,
+        background:C.card2, border:`1px solid ${C.muted}44`,
+        borderRadius:10, padding:"8px 12px", cursor:"pointer",
+        fontSize:16, lineHeight:1, color:C.text,
+        boxShadow:"0 2px 12px rgba(0,0,0,0.15)" }}>
+      {icon[themeMode]}
+    </button>
+  );
+}
+
+// ── GIPHY env config screen ───────────────────────────────────────────────────
+function MissingGiphyConfig() {
+  const { C, g } = useContext(ThemeCtx);
   return (
     <div style={g.page}>
       <div style={g.card}>
-        <div style={g.h1}>GIF Battle 🎭</div>
-        <div style={g.sub}>A free Giphy API key is required to search GIFs</div>
-        <div style={{background:C.card2,borderRadius:12,padding:"14px 16px",marginBottom:16,fontSize:13,lineHeight:1.8,color:C.muted}}>
-          <div style={{color:C.text,fontWeight:700,marginBottom:4}}>Get your free key:</div>
-          1. Go to <a href="https://developers.giphy.com" target="_blank" rel="noreferrer" style={{color:"#f72585"}}>developers.giphy.com</a><br/>
-          2. Log in → <b style={{color:C.text}}>Create an App</b><br/>
-          3. Choose <b style={{color:C.text}}>SDK</b> → fill in app name<br/>
-          4. Copy the <b style={{color:C.text}}>API Key</b> from your dashboard<br/>
-          <div style={{marginTop:8,fontSize:12,color:C.muted}}>💡 On Vercel, set <code style={{background:"#ffffff11",padding:"1px 5px",borderRadius:4}}>NEXT_PUBLIC_GIPHY_KEY</code> env var to skip this screen.</div>
+        <div style={g.h1}>GIF BATTLE</div>
+        <div style={g.sub}>GIPHY is not configured for this deployment</div>
+        <div style={{background:C.card2,borderRadius:12,padding:"14px 16px",marginBottom:16,fontSize:13,lineHeight:1.9,color:C.muted,border:`1px solid ${C.muted}22`}}>
+          <div style={{color:C.text,fontWeight:700,marginBottom:6,fontSize:14}}>Fix deployment config:</div>
+          1. Add <code style={{background:`${C.cyan}18`,color:C.cyan,padding:"1px 6px",borderRadius:4,fontSize:11}}>NEXT_PUBLIC_GIPHY_KEY</code><br/>
+          2. Redeploy the app<br/>
+          <div style={{marginTop:8,fontSize:12,color:C.muted}}>
+            GIF search is disabled until this key is configured.
+          </div>
         </div>
-        {err && <div style={g.err}>⚠ {err}</div>}
-        <input style={g.inp} placeholder="Paste Giphy API key…" value={key}
-          onChange={e=>{setKey(e.target.value);setErr("");}} onKeyDown={e=>e.key==="Enter"&&save()} />
-        <button style={{...g.btn,...g.btnP,marginBottom:0}} onClick={save}>✅ Save & Play</button>
       </div>
     </div>
   );
 }
 
 // ── Home ──────────────────────────────────────────────────────────────────────
-function HomeScreen({ nick, setNick, joinIn, setJoinIn, err, setErr, onCreate, onJoin, onSettings }) {
+function HomeScreen({ nick, setNick, joinIn, setJoinIn, err, setErr, onCreate, onJoin }) {
+  const { C, g } = useContext(ThemeCtx);
   return (
     <div style={g.page}>
-      <div style={g.card}>
-        <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start"}}>
-          <div style={g.h1}>GIF Battle 🎭</div>
-          {onSettings && <button onClick={onSettings} style={{...g.btnSm,background:"transparent",color:C.muted,fontSize:18}} title="Settings">⚙️</button>}
+      <div style={{...g.card,position:"relative"}}>
+        <div style={{textAlign:"center", marginBottom:28}}>
+          <div style={{fontSize:72, fontWeight:900, fontFamily:"'Bebas Neue', sans-serif", letterSpacing:5,
+            background:`linear-gradient(135deg, ${C.accent} 0%, #ff8800 50%, ${C.cyan} 100%)`,
+            WebkitBackgroundClip:"text", WebkitTextFillColor:"transparent", lineHeight:1, marginBottom:6}}>
+            GIF BATTLE
+          </div>
+          <div style={{color:C.muted, fontSize:11, letterSpacing:5, fontWeight:600}}>PICK · VOTE · GLORY</div>
         </div>
-        <div style={g.sub}>Pick GIFs. Vote for the funniest. Win eternal glory.</div>
         {err && <div style={g.err}>⚠ {err}</div>}
         <input style={g.inp} placeholder="Your nickname" value={nick} maxLength={20}
           onChange={e=>{setNick(e.target.value);setErr("");}} onKeyDown={e=>e.key==="Enter"&&onCreate()} />
-        <button style={{...g.btn,...g.btnP}} onClick={onCreate}>🎲 Create Room</button>
+        <button className="gbtn" style={{...g.btn,...g.btnP}} onClick={onCreate}>🎲 Create Room</button>
         <div style={g.divider}>— or join with a code —</div>
         <input style={g.inp} placeholder="Room code (e.g. AB12)" value={joinIn} maxLength={6}
           onChange={e=>{setJoinIn(e.target.value.toUpperCase());setErr("");}} onKeyDown={e=>e.key==="Enter"&&onJoin()} />
-        <button style={{...g.btn,...g.btnS,marginBottom:0}} onClick={onJoin}>🚪 Join Room</button>
+        <button className="gbtn" style={{...g.btn,...g.btnS,marginBottom:0}} onClick={onJoin}>🚪 Join Room</button>
       </div>
     </div>
   );
@@ -727,6 +892,7 @@ function HomeScreen({ nick, setNick, joinIn, setJoinIn, err, setErr, onCreate, o
 
 // ── Lobby ─────────────────────────────────────────────────────────────────────
 function Lobby({ gs, pid, code, isHost, startGame, leave, writeGs }) {
+  const { C, g } = useContext(ThemeCtx);
   const [copied, setCopied] = useState(false);
   const [promptInput, setPromptInput] = useState("");
   const [generating, setGenerating] = useState(false);
@@ -838,14 +1004,14 @@ function Lobby({ gs, pid, code, isHost, startGame, leave, writeGs }) {
   return (
     <div style={g.page}>
       <div style={g.card}>
-        <div style={{...g.h1,marginBottom:4}}>Lobby</div>
+        <div style={{...g.h1,marginBottom:4}}>LOBBY</div>
         <div style={g.sub}>Share the code & wait for friends</div>
-        <div style={{background:C.card2,borderRadius:12,padding:"12px 18px",marginBottom:18,display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+        <div style={{background:C.card2,borderRadius:12,padding:"14px 20px",marginBottom:20,display:"flex",justifyContent:"space-between",alignItems:"center",border:`1px solid ${C.cyan}33`}}>
           <div>
-            <div style={{fontSize:11,color:C.muted,letterSpacing:2,marginBottom:2}}>ROOM CODE</div>
-            <div style={{fontSize:36,fontWeight:900,letterSpacing:8,color:"#fff"}}>{code}</div>
+            <div style={{fontSize:10,color:C.muted,letterSpacing:3,marginBottom:4,fontWeight:600}}>ROOM CODE</div>
+            <div style={{fontSize:42,fontWeight:900,letterSpacing:10,color:C.cyan,fontFamily:"'Space Mono', monospace",animation:"codeGlow 2.5s ease-in-out infinite"}}>{code}</div>
           </div>
-          <button style={{...g.btnSm,background:copied?C.green:C.accent,color:"#fff"}} onClick={copy}>{copied?"✓ Copied":"📋 Copy"}</button>
+          <button className="gbtn" style={{...g.btnSm,background:copied?C.green:C.accent,color:"#fff",padding:"10px 18px"}} onClick={copy}>{copied?"✓ Copied":"Copy"}</button>
         </div>
 
         {/* Settings grid */}
@@ -863,7 +1029,7 @@ function Lobby({ gs, pid, code, isHost, startGame, leave, writeGs }) {
                   {options.map(n=>(
                     <button key={n} onClick={()=>onPick(n)} style={{
                       ...g.btnSm, flex:1,
-                      background:current===n?"linear-gradient(135deg,#f72585,#7209b7)":C.card2,
+                      background:current===n?`linear-gradient(135deg, ${C.accent}, ${C.cyan})`:C.card2,
                       color:current===n?"#fff":C.text,
                       border:current===n?"none":`1px solid ${C.muted}44`
                     }}>{n}{hint}</button>
@@ -942,7 +1108,7 @@ function Lobby({ gs, pid, code, isHost, startGame, leave, writeGs }) {
                     </button>
                     {anthropicKey && (
                       <button onClick={clearKey}
-                        style={{...g.btnSm,background:"#f7258518",color:C.accent,border:"none"}}>
+                        style={{...g.btnSm,background:`${C.accent}18`,color:C.accent,border:"none"}}>
                         Clear
                       </button>
                     )}
@@ -960,7 +1126,7 @@ function Lobby({ gs, pid, code, isHost, startGame, leave, writeGs }) {
                     />
                     <div style={{display:"flex",gap:8}}>
                       <button onClick={saveKey}
-                        style={{...g.btnSm,flex:1,background:"linear-gradient(135deg,#f72585,#7209b7)",color:"#fff"}}>
+                        style={{...g.btnSm,flex:1,background:`linear-gradient(135deg, ${C.accent}, ${C.cyan})`,color:"#fff"}}>
                         Save
                       </button>
                       <button onClick={()=>{setEditingKey(false);setKeyInput(anthropicKey);}}
@@ -994,7 +1160,7 @@ function Lobby({ gs, pid, code, isHost, startGame, leave, writeGs }) {
                           disabled={already}
                           style={{
                             ...g.btnSm,
-                            background:already?C.card2:"linear-gradient(135deg,#f72585,#7209b7)",
+                            background:already?C.card2:`linear-gradient(135deg, ${C.accent}, ${C.cyan})`,
                             color:already?C.muted:"#fff",
                             border:already?`1px solid ${C.muted}44`:"none",
                             minWidth:32,
@@ -1022,7 +1188,7 @@ function Lobby({ gs, pid, code, isHost, startGame, leave, writeGs }) {
               {isHost && (
                 <button
                   onClick={() => removePrompt(p)}
-                  style={{...g.btnSm,background:"#f7258518",color:C.accent,fontSize:11,padding:"3px 8px"}}
+                  style={{...g.btnSm,background:`${C.accent}18`,color:C.accent,fontSize:11,padding:"3px 8px"}}
                 >
                   ✕
                 </button>
@@ -1037,10 +1203,10 @@ function Lobby({ gs, pid, code, isHost, startGame, leave, writeGs }) {
             <span style={{fontWeight:600}}>{p.nickname}</span>
             <div style={{...g.row,gap:6}}>
               {p.id===gs.host&&<span style={{...g.badge,background:"#f7258522",color:C.accent}}>HOST</span>}
-              {p.id===pid&&<span style={{...g.badge,background:"#7209b722",color:"#b060ff"}}>YOU</span>}
+              {p.id===pid&&<span style={{...g.badge,background:`${C.cyan}22`,color:C.cyan}}>YOU</span>}
               {isHost&&p.id!==pid&&(
                 <button onClick={()=>kickPlayer(p.id)}
-                  style={{...g.btnSm,background:"#f7258518",color:C.accent,fontSize:11,padding:"4px 10px"}}>
+                  style={{...g.btnSm,background:`${C.accent}18`,color:C.accent,fontSize:11,padding:"4px 10px"}}>
                   ✕ Kick
                 </button>
               )}
@@ -1049,9 +1215,9 @@ function Lobby({ gs, pid, code, isHost, startGame, leave, writeGs }) {
         ))}
         <div style={{marginTop:16}}>
           {isHost
-            ?<button style={{...g.btn,...g.btnP}} onClick={startGame}>{gs.players.length<2?"⏳ Need more players…":"🚀 Start Game"}</button>
-            :<div style={{textAlign:"center",color:C.muted,padding:12,background:C.card2,borderRadius:10,marginBottom:10}}>⏳ Waiting for host to start…</div>}
-          <button style={{...g.btn,...g.btnS,marginBottom:0}} onClick={leave}>← Leave</button>
+            ?<button className="gbtn" style={{...g.btn,...g.btnP}} onClick={startGame}>{gs.players.length<2?"⏳ Need more players…":"🚀 Start Game"}</button>
+            :<div style={{textAlign:"center",color:C.muted,padding:12,background:C.card2,borderRadius:10,marginBottom:10,border:`1px solid ${C.muted}22`}}>⏳ Waiting for host to start…</div>}
+          <button className="gbtn" style={{...g.btn,...g.btnS,marginBottom:0}} onClick={leave}>← Leave</button>
         </div>
       </div>
     </div>
@@ -1060,6 +1226,7 @@ function Lobby({ gs, pid, code, isHost, startGame, leave, writeGs }) {
 
 // ── Submit ────────────────────────────────────────────────────────────────────
 function Submit({ gs, pid, apiKey, writeGs, fetchGs, transitioning, transitionToVoting, isHost }) {
+  const { C, g } = useContext(ThemeCtx);
   const rounds = getRounds(gs);
   const subs = (gs.submissions || {}) as Record<string, Array<{url:string, preview:string}>>;
   const myAssignedRounds = getAssignedRoundIndexes(gs, pid);
@@ -1118,10 +1285,11 @@ function Submit({ gs, pid, apiKey, writeGs, fetchGs, transitioning, transitionTo
     setHasMore(false);
     setSearching(true);
     setSearchErr("");
-    const r = await searchGifs(q, apiKey, 0);
-    if (!r.length) setSearchErr("No results — try different keywords");
-    setGifs(r);
-    setHasMore(r.length === 12);
+    const { items, error } = await searchGifs(q, apiKey, 0);
+    if (error) setSearchErr(error);
+    else if (!items.length) setSearchErr("No results — try different keywords");
+    setGifs(items);
+    setHasMore(items.length === 12);
     setSearching(false);
   };
 
@@ -1129,10 +1297,16 @@ function Submit({ gs, pid, apiKey, writeGs, fetchGs, transitioning, transitionTo
     if (searching || !hasMore || !query.trim()) return;
     const newOffset = offset + 12;
     setSearching(true);
-    const r = await searchGifs(query, apiKey, newOffset);
-    setGifs(prev => [...prev, ...r]);
+    const { items, error } = await searchGifs(query, apiKey, newOffset);
+    if (error) {
+      setSearchErr(error);
+      setHasMore(false);
+      setSearching(false);
+      return;
+    }
+    setGifs(prev => [...prev, ...items]);
     setOffset(newOffset);
-    setHasMore(r.length === 12);
+    setHasMore(items.length === 12);
     setSearching(false);
   }, [searching, hasMore, offset, query, apiKey]);
 
@@ -1155,7 +1329,7 @@ function Submit({ gs, pid, apiKey, writeGs, fetchGs, transitioning, transitionTo
     setQuery(v);
     clearTimeout(searchQ.current!);
     if (v.trim().length > 1) searchQ.current = setTimeout(() => doSearch(v), 500);
-    else { setGifs([]); setHasMore(false); setOffset(0); }
+    else { setGifs([]); setHasMore(false); setOffset(0); setSearchErr(""); }
   };
 
   const submit = async () => {
@@ -1196,18 +1370,25 @@ function Submit({ gs, pid, apiKey, writeGs, fetchGs, transitioning, transitionTo
     } finally { transitioning.current = false; }
   };
 
+  const totalSubmitSecs = (gs.submitSecs ?? SUBMIT_SECS) * rounds;
+
   // Waiting screen — this player finished all their submissions
   if (isDone) {
     return (
       <div style={g.page}>
         <div style={g.card}>
-          <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:14}}>
-            <div style={{fontSize:13,color:C.muted}}>Time remaining</div>
-            <div style={{...g.timer,fontSize:28,color:tc}}>{t}s</div>
+          <div style={{marginBottom:16}}>
+            <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:6}}>
+              <div style={{fontSize:13,color:C.muted}}>Time remaining</div>
+              <div style={{...g.timer,fontSize:26,color:tc,animation:t<=10?"timerPulse 0.6s ease-in-out infinite":undefined}}>{t}s</div>
+            </div>
+            <div style={{height:4,background:C.card2,borderRadius:4,overflow:"hidden"}}>
+              <div style={{height:"100%",background:tc,width:`${Math.min(100,(t/totalSubmitSecs)*100)}%`,transition:"width 0.4s linear",borderRadius:4}}/>
+            </div>
           </div>
           <div style={{textAlign:"center",marginBottom:18}}>
-            <div style={{fontSize:40}}>✅</div>
-            <div style={g.h2}>All done! Waiting for others…</div>
+            <div style={{fontSize:44,marginBottom:4}}>✅</div>
+            <div style={g.h2}>All done!</div>
             <div style={{color:C.muted,fontSize:13}}>Voting starts when everyone finishes or time runs out</div>
           </div>
           {gs.players.map(p => {
@@ -1219,13 +1400,13 @@ function Submit({ gs, pid, apiKey, writeGs, fetchGs, transitioning, transitionTo
               <div key={p.id} style={g.pRow}>
                 <span style={{fontWeight:600}}>{p.nickname}{p.id===pid?" (you)":""}</span>
                 <span style={{color:done?C.green:C.muted,fontSize:13,fontWeight:600}}>
-                  {done?"✅ Done":`⏳ ${count}/${pAssigned.length || rounds}`}
+                  {done?"✓ Done":`${count}/${pAssigned.length || rounds}`}
                 </span>
               </div>
             );
           })}
           {isHost && (
-            <button style={{...g.btn,...g.btnP,marginTop:8,marginBottom:0}} onClick={forceStart}>
+            <button className="gbtn" style={{...g.btn,...g.btnP,marginTop:8,marginBottom:0}} onClick={forceStart}>
               ⚡ Force Start Voting
             </button>
           )}
@@ -1239,21 +1420,28 @@ function Submit({ gs, pid, apiKey, writeGs, fetchGs, transitioning, transitionTo
   return (
     <div style={g.pageTop}>
       <div style={{...g.wCard,marginTop:20}}>
-        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:6}}>
-          <div style={{fontSize:13,color:C.muted}}>
-            {`Question ${myDoneCount+1} / ${myTargetCount}`}
-            {currentMeta ? ` · Round ${currentMeta.cycle + 1}/${rounds} · Heat ${currentMeta.heat + 1}/${currentMeta.heatsInCycle}` : ""}
+        <div style={{marginBottom:10}}>
+          <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:6}}>
+            <div style={{fontSize:13,color:C.muted}}>
+              {`Question ${myDoneCount+1} / ${myTargetCount}`}
+              {currentMeta ? ` · Round ${currentMeta.cycle + 1}/${rounds} · Heat ${currentMeta.heat + 1}/${currentMeta.heatsInCycle}` : ""}
+            </div>
+            <div style={{...g.timer,fontSize:28,color:tc,animation:t<=10?"timerPulse 0.6s ease-in-out infinite":undefined}}>{t}s</div>
           </div>
-          <div style={{...g.timer,fontSize:28,color:tc}}>{t}s</div>
+          <div style={{height:4,background:C.card2,borderRadius:4,overflow:"hidden"}}>
+            <div style={{height:"100%",background:tc,width:`${Math.min(100,(t/totalSubmitSecs)*100)}%`,transition:"width 0.4s linear",borderRadius:4}}/>
+          </div>
         </div>
         <div style={g.prompt}>"{currentPrompt}"</div>
-        <input style={g.inp} placeholder="🔍 Search for a GIF…" value={query} onChange={onQ} autoFocus/>
+        <input style={g.inp} placeholder="Search for a GIF…" value={query} onChange={onQ} autoFocus/>
         {gifs.length > 0 && (
           <div ref={scrollRef} style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:6,maxHeight:300,overflowY:"auto",marginBottom:12}}>
             {gifs.map(gif => (
               <div key={gif.id} onClick={() => setSel(gif)}
-                style={{position:"relative",paddingBottom:"100%",borderRadius:8,overflow:"hidden",
-                  border:sel?.id===gif.id?`3px solid ${C.accent}`:"3px solid transparent",cursor:"pointer"}}>
+                style={{position:"relative",paddingBottom:"100%",borderRadius:8,overflow:"hidden",cursor:"pointer",
+                  border:sel?.id===gif.id?`3px solid ${C.accent}`:"3px solid transparent",
+                  boxShadow:sel?.id===gif.id?`0 0 12px ${C.accent}66`:"none",
+                  transition:"border-color 0.15s, box-shadow 0.15s"}}>
                 <div style={{position:"absolute",inset:0}}>
                   <GifImg url={gif.preview} style={{width:"100%",height:"100%"}} fit="contain"/>
                 </div>
@@ -1264,17 +1452,18 @@ function Submit({ gs, pid, apiKey, writeGs, fetchGs, transitioning, transitionTo
             )}
           </div>
         )}
-        {searching && <div style={g.info}>🔍 Searching…</div>}
+        {searching && <div style={g.info}>Searching…</div>}
         {searchErr && !searching && <div style={g.err}>⚠ {searchErr}</div>}
+        <PoweredByGiphy/>
         {sel && (
           <div style={{textAlign:"center",marginBottom:12}}>
-            <div style={{fontSize:11,color:C.muted,letterSpacing:2,marginBottom:6}}>SELECTED</div>
-            <GifImg url={sel.preview} style={{width:200,height:150,borderRadius:8,margin:"0 auto",border:`2px solid ${C.accent}`}}/>
+            <div style={{fontSize:10,color:C.muted,letterSpacing:3,marginBottom:6,fontWeight:600}}>SELECTED</div>
+            <GifImg url={sel.preview} style={{width:200,height:150,borderRadius:8,margin:"0 auto",border:`2px solid ${C.accent}`,boxShadow:`0 0 20px ${C.accent}44`}}/>
           </div>
         )}
-        <button style={{...g.btn,...(sel?g.btnP:{background:C.card2,color:C.muted}),cursor:sel?"pointer":"not-allowed",marginBottom:0}}
+        <button className="gbtn" style={{...g.btn,...(sel?g.btnP:{background:C.card2,color:C.muted}),cursor:sel?"pointer":"not-allowed",marginBottom:0}}
           onClick={submit} disabled={!sel}>
-          {sel?"✅ Submit GIF":"Select a GIF first"}
+          {sel?"Submit GIF":"Select a GIF first"}
         </button>
       </div>
     </div>
@@ -1283,6 +1472,7 @@ function Submit({ gs, pid, apiKey, writeGs, fetchGs, transitioning, transitionTo
 
 // ── Voting ────────────────────────────────────────────────────────────────────
 function Voting({ gs, pid, code, isHost, fetchGs, writeGs, transitioning, advanceMatchup }) {
+  const { C, g } = useContext(ThemeCtx);
   const rounds = getRounds(gs);
   const meta = getRoundPlan(gs)[gs.votingRound];
   const mi = gs.currentMatchup;
@@ -1361,19 +1551,30 @@ function Voting({ gs, pid, code, isHost, fetchGs, writeGs, transitioning, advanc
     const isWinner=showRes&&(side==="left"?lv>rv:rv>lv);
     const isTie=showRes&&lv===rv;
     const myVoteThis=myVote===side;
+    const voteCount=side==="left"?lv:rv;
     return(
-      <div style={{display:"flex",flexDirection:"column",alignItems:"center",gap:8}}>
+      <div className="gif-vote-card" style={{display:"flex",flexDirection:"column",alignItems:"center",gap:10}}>
         <div style={{borderRadius:12,overflow:"hidden",width:"100%",
           border:showRes?isWinner?`3px solid ${C.green}`:isTie?`3px solid ${C.yellow}`:"3px solid transparent"
-            :myVoteThis?`3px solid ${C.accent}`:"3px solid transparent"}}>
+            :myVoteThis?`3px solid ${C.accent}`:"3px solid transparent",
+          boxShadow:showRes&&isWinner?`0 0 24px ${C.green}55`:myVoteThis?`0 0 16px ${C.accent}44`:"none",
+          transition:"border-color 0.2s, box-shadow 0.2s"}}>
           {sub
-            ?<GifImg url={sub.url} style={{width:"100%",height:220}}/>
-            :<div style={{height:220,background:C.card2,display:"flex",alignItems:"center",justifyContent:"center",color:C.muted}}>No GIF</div>}
+            ?<GifImg className="vote-gif" url={sub.url} style={{width:"100%",height:220}}/>
+            :<div className="vote-gif" style={{height:220,background:C.card2,display:"flex",alignItems:"center",justifyContent:"center",color:C.muted}}>No GIF</div>}
         </div>
-        {showRes&&<div style={{fontWeight:700,fontSize:17,color:isWinner?C.green:isTie?C.yellow:C.muted}}>{side==="left"?lv:rv} vote{(side==="left"?lv:rv)!==1?"s":""}{isWinner?" 🏆":isTie?" 🤝":""}</div>}
-        {!showRes&&canVote&&<button onClick={()=>vote(side)} style={{...g.btn,...g.btnP,marginBottom:0}}>{side==="left"?"👈 This one":"This one 👉"}</button>}
-        {!showRes&&id===pid&&<div style={{color:C.yellow,fontSize:13,fontWeight:600}}>⭐ Your GIF</div>}
-        {!showRes&&myVoteThis&&id!==pid&&<div style={{color:C.accent,fontSize:13,fontWeight:600}}>✅ Voted</div>}
+        {showRes&&(
+          <div style={{fontWeight:900,fontSize:18,fontFamily:"'Bebas Neue', sans-serif",letterSpacing:1,color:isWinner?C.green:isTie?C.yellow:C.muted}}>
+            {voteCount} {voteCount!==1?"VOTES":"VOTE"}{isWinner?" 🏆":isTie?" 🤝":""}
+          </div>
+        )}
+        {!showRes&&canVote&&(
+          <button className="gbtn" onClick={()=>vote(side)} style={{...g.btn,...g.btnP,marginBottom:0,fontSize:16,letterSpacing:1}}>
+            {side==="left"?"← VOTE":"VOTE →"}
+          </button>
+        )}
+        {!showRes&&id===pid&&<div style={{color:C.yellow,fontSize:13,fontWeight:700,letterSpacing:1}}>★ YOUR GIF</div>}
+        {!showRes&&myVoteThis&&id!==pid&&<div style={{color:C.green,fontSize:13,fontWeight:700,letterSpacing:1}}>✓ VOTED</div>}
       </div>
     );
   };
@@ -1381,20 +1582,31 @@ function Voting({ gs, pid, code, isHost, fetchGs, writeGs, transitioning, advanc
   return(
     <div style={g.pageTop}>
       <div style={{...g.wCard,marginTop:20}}>
-        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:6}}>
-          <div style={{fontSize:13,color:C.muted}}>
-            {meta
-              ? `Round ${meta.cycle + 1}/${rounds} · Heat ${meta.heat + 1}/${meta.heatsInCycle} · Matchup ${mi+1}/${gs.matchups.length}`
-              : `Round ${gs.votingRound+1} / ${rounds} · Matchup ${mi+1}/${gs.matchups.length}`}
+        <div style={{marginBottom:10}}>
+          <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:6}}>
+            <div style={{fontSize:13,color:C.muted}}>
+              {meta
+                ? `Round ${meta.cycle + 1}/${rounds} · Heat ${meta.heat + 1}/${meta.heatsInCycle} · Matchup ${mi+1}/${gs.matchups.length}`
+                : `Round ${gs.votingRound+1} / ${rounds} · Matchup ${mi+1}/${gs.matchups.length}`}
+            </div>
+            <div style={{...g.timer,fontSize:34,color:tc,animation:t<=5?"timerPulse 0.5s ease-in-out infinite":undefined}}>{t}s</div>
           </div>
-          <div style={{...g.timer,fontSize:34,color:tc}}>{t}s</div>
+          <div style={{height:4,background:C.card2,borderRadius:4,overflow:"hidden"}}>
+            <div style={{height:"100%",background:tc,width:`${Math.min(100,(t/vSecs)*100)}%`,transition:"width 0.4s linear",borderRadius:4}}/>
+          </div>
         </div>
         <div style={g.prompt}>"{currentPrompt}"</div>
-        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:16,marginBottom:12}}>
+        <div className="vote-grid" style={{display:"grid",gap:12,alignItems:"start",marginBottom:12}}>
           <GifCard sub={lSub} id={lId} side="left"/>
+          <div className="vote-vs" style={{display:"flex",alignItems:"center",justifyContent:"center",paddingTop:80,
+            fontSize:38,fontFamily:"'Bebas Neue', sans-serif",letterSpacing:2,color:C.accent,
+            animation:"vsPulse 1.8s ease-in-out infinite"}}>
+            VS
+          </div>
           <GifCard sub={rSub} id={rId} side="right"/>
         </div>
-        <div style={{textAlign:"center",color:C.muted,fontSize:13}}>
+        <PoweredByGiphy/>
+        <div style={{textAlign:"center",color:C.muted,fontSize:13,marginTop:8}}>
           {showRes?(lv>rv?"Left wins! ✨":rv>lv?"Right wins! ✨":"Tie! Both get a point 🤝")+" Next up soon…"
             :inMatchup?"Your GIF is in this matchup — sit tight!"
             :myVote?"Vote cast! Waiting for timer…":"Vote for the funnier GIF!"}
@@ -1406,6 +1618,7 @@ function Voting({ gs, pid, code, isHost, fetchGs, writeGs, transitioning, advanc
 
 // ── Round Results ─────────────────────────────────────────────────────────────
 function RoundResults({ gs, isHost, nextVotingRound, transitioning }) {
+  const { C, g } = useContext(ThemeCtx);
   const rounds = getRounds(gs);
   const totalVotingRounds = getTotalVotingRounds(gs);
   const meta = getRoundPlan(gs)[gs.votingRound];
@@ -1440,18 +1653,18 @@ function RoundResults({ gs, isHost, nextVotingRound, transitioning }) {
   return(
     <div style={g.page}>
       <div style={g.card}>
-        <div style={{textAlign:"center",marginBottom:18}}>
-          <div style={{fontSize:40}}>🏆</div>
+        <div style={{textAlign:"center",marginBottom:20}}>
+          <div style={{fontSize:44,marginBottom:4}}>🏆</div>
           <div style={g.h2}>
             {meta
               ? `Round ${meta.cycle + 1}/${rounds} · Heat ${meta.heat + 1}/${meta.heatsInCycle} Results`
               : `Round ${(gs.votingRound ?? 0) + 1} Results`}
           </div>
-          {rWinnerNames.length>0&&<div style={{color:C.yellow,fontWeight:700}}>{rWinnerNames.join(" & ")} won this round!</div>}
+          {rWinnerNames.length>0&&<div style={{color:C.yellow,fontWeight:700,fontSize:15}}>{rWinnerNames.join(" & ")} won this round!</div>}
         </div>
         <Scoreboard players={sorted} highlightIds={rWinners}/>
         <div style={{marginTop:16,textAlign:"center"}}>
-          <div style={{color:C.muted,fontSize:13,marginBottom:10}}>
+          <div style={{color:C.muted,fontSize:13,marginBottom:12}}>
             {isLast
               ? `Final results in ${t}s…`
               : nextMeta
@@ -1459,11 +1672,11 @@ function RoundResults({ gs, isHost, nextVotingRound, transitioning }) {
                 : `Next round starts in ${t}s…`}
           </div>
           {isHost && (
-            <button style={{...g.btn,...g.btnP,marginBottom:0}} onClick={() => {
+            <button className="gbtn" style={{...g.btn,...g.btnP,marginBottom:0}} onClick={() => {
               if (advRef.current || transitioning.current) return;
               advRef.current = true; transitioning.current = true;
               nextVotingRound().finally(() => { transitioning.current = false; });
-            }}>{isLast ? "🎉 Show Results Now" : "▶ Skip Wait"}</button>
+            }}>{isLast ? "Show Results Now" : "▶ Skip Wait"}</button>
           )}
         </div>
       </div>
@@ -1473,6 +1686,7 @@ function RoundResults({ gs, isHost, nextVotingRound, transitioning }) {
 
 // ── Game Over ─────────────────────────────────────────────────────────────────
 function GameOver({ gs, writeGs, pid }) {
+  const { C, g } = useContext(ThemeCtx);
   const rounds = getRounds(gs);
   const sorted=[...gs.players].sort((a,b)=>b.score-a.score);
   const medals=["🥇","🥈","🥉"];
@@ -1514,35 +1728,44 @@ function GameOver({ gs, writeGs, pid }) {
   return(
     <div style={g.pageTop}>
       <div style={{...g.wCard,marginTop:20}}>
-        <div style={{textAlign:"center",marginBottom:20}}>
-          <div style={{fontSize:52}}>🎊</div>
-          <div style={g.h1}>Game Over!</div>
-          <div style={{color:C.yellow,fontWeight:700,fontSize:18,marginTop:4}}>{sorted[0]?.nickname} wins!</div>
+        <div style={{textAlign:"center",marginBottom:24}}>
+          <div style={{fontSize:56,marginBottom:4}}>🎊</div>
+          <div style={{fontSize:80,fontWeight:900,fontFamily:"'Bebas Neue', sans-serif",letterSpacing:4,
+            background:`linear-gradient(135deg, ${C.yellow}, ${C.accent} 50%, ${C.yellow})`,
+            WebkitBackgroundClip:"text",WebkitTextFillColor:"transparent",lineHeight:1,marginBottom:8}}>
+            GAME OVER
+          </div>
+          <div style={{fontSize:20,fontWeight:700,color:C.yellow}}>
+            👑 {sorted[0]?.nickname} wins!
+          </div>
         </div>
         <div style={{marginBottom:18}}>
           {sorted.map((p,i)=>(
-            <div key={p.id} style={{...g.pRow,background:i===0?"#f7258514":C.card2,borderLeft:i===0?`3px solid ${C.accent}`:"3px solid transparent"}}>
+            <div key={p.id} style={{...g.pRow,
+              background:i===0?`${C.accent}12`:C.card2,
+              borderLeft:i===0?`3px solid ${C.accent}`:"3px solid transparent",
+              boxShadow:i===0?`inset 0 0 30px ${C.accent}08`:"none"}}>
               <div style={g.row}>
-                <span style={{fontSize:20}}>{medals[i]||"🎖"}</span>
-                <span style={{fontWeight:i===0?800:500}}>{p.nickname}</span>
-                {p.id===pid&&<span style={{...g.badge,background:"#7209b722",color:"#b060ff",fontSize:10}}>YOU</span>}
+                <span style={{fontSize:22}}>{medals[i]||"🎖"}</span>
+                <span style={{fontWeight:i===0?800:500,fontSize:i===0?16:15}}>{p.nickname}</span>
+                {p.id===pid&&<span style={{...g.badge,background:`${C.cyan}18`,color:C.cyan}}>YOU</span>}
               </div>
-              <span style={{fontWeight:800,color:i===0?C.accent:C.text}}>{p.score} pts</span>
+              <span style={{fontWeight:900,fontSize:i===0?20:15,fontFamily:"'Space Mono', monospace",color:i===0?C.accent:C.text}}>{p.score}</span>
             </div>
           ))}
         </div>
 
-        <div style={{background:C.card2,borderRadius:12,padding:"14px 16px",marginBottom:18}}>
-          <div style={{fontSize:11,color:C.muted,letterSpacing:2,marginBottom:10}}>GAME SUMMARY</div>
+        <div style={{background:C.card2,borderRadius:12,padding:"14px 16px",marginBottom:18,border:`1px solid ${C.muted}22`}}>
+          <div style={{fontSize:10,color:C.muted,letterSpacing:3,marginBottom:10,fontWeight:600}}>GAME SUMMARY</div>
           <div style={{fontSize:12,color:C.muted,marginBottom:12}}>
             {`${summaryRows.length} heat${summaryRows.length!==1?"s":""} played across ${rounds} round${rounds!==1?"s":""}`}
           </div>
           {summaryRows.map(row => (
-            <div key={row.idx} style={{background:`${C.bg}88`,borderRadius:10,padding:"12px 12px 10px",marginBottom:10}}>
-              <div style={{fontSize:12,color:C.muted,marginBottom:6}}>
-                {`Round ${row.cycle + 1}/${rounds} · Heat ${row.heat + 1}/${row.heatsInCycle}`}
+            <div key={row.idx} style={{background:`${C.bg}88`,borderRadius:10,padding:"12px 12px 10px",marginBottom:10,border:`1px solid ${C.muted}18`}}>
+              <div style={{fontSize:11,color:C.muted,marginBottom:4,letterSpacing:1}}>
+                {`ROUND ${row.cycle + 1}/${rounds} · HEAT ${row.heat + 1}/${row.heatsInCycle}`}
               </div>
-              <div style={{fontSize:16,fontWeight:700,marginBottom:10,color:"#fff"}}>
+              <div style={{fontSize:15,fontWeight:600,marginBottom:10,color:C.text,fontStyle:"italic"}}>
                 "{row.prompt || "No prompt"}"
               </div>
               <div style={{display:"grid",gridTemplateColumns:"repeat(2,minmax(0,1fr))",gap:10}}>
@@ -1550,8 +1773,8 @@ function GameOver({ gs, writeGs, pid }) {
                   const sub = subs[playerId]?.[row.idx];
                   const nick = playerNameById.get(playerId) || "Player";
                   return (
-                    <div key={`${row.idx}-${playerId}`} style={{background:C.card,borderRadius:8,padding:"8px"}}>
-                      <div style={{fontSize:12,fontWeight:700,marginBottom:6}}>{nick}</div>
+                    <div key={`${row.idx}-${playerId}`} style={{background:C.card,borderRadius:8,padding:"8px",border:`1px solid ${C.muted}22`}}>
+                      <div style={{fontSize:11,fontWeight:700,marginBottom:6,color:C.muted,letterSpacing:1}}>{nick.toUpperCase()}</div>
                       {sub?.url
                         ? <GifImg url={sub.url} style={{height:130,borderRadius:6}} fit="cover"/>
                         : <div style={{height:130,background:C.card2,borderRadius:6,display:"flex",alignItems:"center",justifyContent:"center",color:C.muted,fontSize:12}}>No GIF</div>}
@@ -1562,26 +1785,30 @@ function GameOver({ gs, writeGs, pid }) {
             </div>
           ))}
         </div>
+        <PoweredByGiphy/>
 
-        <button style={{...g.btn,...g.btnP,marginBottom:0}} onClick={playAgain}>🔄 Play Again</button>
+        <button className="gbtn" style={{...g.btn,...g.btnP,marginBottom:0,fontSize:16,letterSpacing:1}} onClick={playAgain}>↺ Play Again</button>
       </div>
     </div>
   );
 }
 
 function Scoreboard({players,highlightIds=[]}){
+  const { C, g } = useContext(ThemeCtx);
   const sorted=[...players].sort((a,b)=>b.score-a.score);
   return(
     <div>
-      <div style={{fontSize:11,color:C.muted,letterSpacing:2,marginBottom:8}}>SCOREBOARD</div>
+      <div style={{fontSize:10,color:C.muted,letterSpacing:3,marginBottom:10,fontWeight:600}}>SCOREBOARD</div>
       {sorted.map((p,i)=>(
-        <div key={p.id} style={{...g.pRow,background:highlightIds.includes(p.id)?`${C.yellow}18`:C.card2}}>
+        <div key={p.id} style={{...g.pRow,
+          background:highlightIds.includes(p.id)?`${C.yellow}14`:C.card2,
+          borderLeft:highlightIds.includes(p.id)?`2px solid ${C.yellow}`:"2px solid transparent"}}>
           <div style={{...g.row,gap:8}}>
-            <span style={{color:C.muted,width:18,fontSize:13}}>{i+1}.</span>
-            <span style={{fontWeight:500}}>{p.nickname}</span>
-            {highlightIds.includes(p.id)&&<span>⭐</span>}
+            <span style={{fontFamily:"'Space Mono', monospace",color:i===0?C.accent:C.muted,width:22,fontSize:12,fontWeight:700}}>{i+1}</span>
+            <span style={{fontWeight:i===0?700:500}}>{p.nickname}</span>
+            {highlightIds.includes(p.id)&&<span style={{fontSize:12}}>⭐</span>}
           </div>
-          <span style={{fontWeight:700,color:i===0?C.accent:C.text}}>{p.score} pts</span>
+          <span style={{fontWeight:800,fontFamily:"'Space Mono', monospace",fontSize:14,color:i===0?C.accent:C.text}}>{p.score}</span>
         </div>
       ))}
     </div>

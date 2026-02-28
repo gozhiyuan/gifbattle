@@ -38,6 +38,7 @@ Open [http://localhost:3000](http://localhost:3000). To test multiplayer locally
 **Giphy API key** (free):
 1. Go to [developers.giphy.com](https://developers.giphy.com) → Create an App → SDK
 2. Copy the API Key from your dashboard
+3. Set it as `NEXT_PUBLIC_GIPHY_KEY` in your deployment environment
 
 ## Deploying to Vercel
 
@@ -68,6 +69,11 @@ components/
 |---|---|
 | `UPSTASH_REDIS_REST_URL` | Upstash Redis REST endpoint |
 | `UPSTASH_REDIS_REST_TOKEN` | Upstash Redis auth token |
-| `NEXT_PUBLIC_GIPHY_KEY` | Giphy API key for GIF search |
+| `NEXT_PUBLIC_GIPHY_KEY` | Required app-level Giphy key for GIF search (users cannot override in UI) |
+
+### LLM key behavior
+
+- GIF search always uses the app-level `NEXT_PUBLIC_GIPHY_KEY`.
+- Prompt generation is separate and supports host-provided Anthropic keys (BYOK) in the lobby UI.
 
 Room data expires automatically after 24 hours.

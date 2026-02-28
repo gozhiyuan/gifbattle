@@ -1,0 +1,93 @@
+@import url('https://fonts.googleapis.com/css2?family=Bebas+Neue&family=DM+Sans:wght@400;500;600;700&family=Space+Mono:wght@400;700&display=swap');
+
+* { box-sizing: border-box; }
+body { margin: 0; padding: 0; }
+
+:root {
+  --code-glow-1: #00e5ff99;
+  --code-glow-2: #00e5ff44;
+  --code-glow-3: #00e5ff;
+  --code-glow-4: #00e5ff66;
+  --code-glow-5: #00e5ff22;
+}
+
+@media (prefers-color-scheme: light) {
+  :root {
+    --code-glow-1: #007aa899;
+    --code-glow-2: #007aa844;
+    --code-glow-3: #007aa8;
+    --code-glow-4: #007aa866;
+    --code-glow-5: #007aa833;
+  }
+}
+
+html[data-theme="dark"] {
+  --code-glow-1: #00e5ff99;
+  --code-glow-2: #00e5ff44;
+  --code-glow-3: #00e5ff;
+  --code-glow-4: #00e5ff66;
+  --code-glow-5: #00e5ff22;
+}
+
+html[data-theme="light"] {
+  --code-glow-1: #007aa899;
+  --code-glow-2: #007aa844;
+  --code-glow-3: #007aa8;
+  --code-glow-4: #007aa866;
+  --code-glow-5: #007aa833;
+}
+
+@keyframes timerPulse {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50% { opacity: 0.55; transform: scale(1.06); }
+}
+
+@keyframes codeGlow {
+  0%, 100% { text-shadow: 0 0 14px var(--code-glow-1), 0 0 30px var(--code-glow-2); }
+  50% { text-shadow: 0 0 28px var(--code-glow-3), 0 0 60px var(--code-glow-4), 0 0 100px var(--code-glow-5); }
+}
+
+@keyframes vsPulse {
+  0%, 100% { transform: scale(1) rotate(-3deg); text-shadow: 0 0 16px #ff297999; }
+  50% { transform: scale(1.14) rotate(3deg); text-shadow: 0 0 40px #ff2979, 0 0 80px #ff297944; }
+}
+
+@keyframes fadeUp {
+  from { opacity: 0; transform: translateY(18px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.gbtn { transition: opacity 0.15s ease, transform 0.1s ease; }
+.gbtn:hover { opacity: 0.86; transform: translateY(-1px); }
+.gbtn:active { transform: translateY(1px) scale(0.98); opacity: 1; }
+
+.gif-vote-card { transition: transform 0.18s ease, box-shadow 0.18s ease; }
+.gif-vote-card:hover { transform: translateY(-4px); }
+
+.vote-grid { grid-template-columns: 1fr auto 1fr; }
+
+input:focus {
+  border-color: #ff297966 !important;
+  box-shadow: 0 0 0 3px #ff297916 !important;
+  outline: none !important;
+}
+
+@media (max-width: 900px) {
+  .vote-grid { grid-template-columns: 1fr; }
+  .vote-vs { padding-top: 0 !important; font-size: 30px !important; }
+  .vote-gif { height: 180px !important; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+
+  .gbtn:hover,
+  .gif-vote-card:hover {
+    transform: none !important;
+  }
+}
