@@ -377,11 +377,11 @@ const getAssignedRoundIndexes = (state, playerId: string) => {
   return idx;
 };
 
-const countSubmittedRounds = (arr: Array<{url:string, preview:string}> | undefined, indexes: number[]) =>
+const countSubmittedRounds = (arr: Array<Submission> | undefined, indexes: number[]) =>
   indexes.reduce((sum, ri) => sum + (arr?.[ri] ? 1 : 0), 0);
 
 const getEligibleForRound = (state, roundIndex: number) => {
-  const subs = (state?.submissions || {}) as Record<string, Array<{url:string, preview:string}>>;
+  const subs = (state?.submissions || {}) as Record<string, Array<Submission>>;
   return Object.entries(subs)
     .filter(([, arr]) => arr?.[roundIndex] != null)
     .map(([id]) => id);
@@ -430,6 +430,14 @@ const storage = {
   delPrefix: async (prefix: string) => {
     await fetch(`/api/store?prefix=${encodeURIComponent(prefix)}`, { method: "DELETE" });
   },
+};
+
+// ── Submission type ────────────────────────────────────────────────────────────
+type Submission = {
+  type?: "giphy" | "text" | "ai";
+  url?: string;
+  preview?: string;
+  textAnswer?: string;
 };
 
 // ── Giphy search ───────────────────────────────────────────────────────────────
@@ -680,13 +688,6 @@ export default function App() {
     setView("home"); setGs(null); setCode(""); setErr("");
   };
 
-  if (!envKey) return (
-    <ThemeCtx.Provider value={themeCtxVal}>
-      <ThemeToggle />
-      <MissingGiphyConfig />
-    </ThemeCtx.Provider>
-  );
-
   if (view === "home") return (
     <ThemeCtx.Provider value={themeCtxVal}>
       <ThemeToggle />
@@ -815,7 +816,7 @@ export default function App() {
     await writeGs({ ...fresh, votingRound:nextVR, phase:"voting", matchups, currentMatchup:0, roundMatchupWins:{}, voteDeadline:Date.now()+(fresh.voteSecs??VOTE_SECS)*1000 });
   };
 
-  const sp = { gs, pid, code, isHost, apiKey: envKey, writeGs, fetchGs, transitioning, transitionToVoting, advanceMatchup, startGame, nextVotingRound, leave };
+  const sp = { gs, pid, code, isHost, apiKey: envKey, geminiKey: gs?.geminiKey || "", writeGs, fetchGs, transitioning, transitionToVoting, advanceMatchup, startGame, nextVotingRound, leave };
   return (
     <ThemeCtx.Provider value={themeCtxVal}>
       <ThemeToggle />
@@ -899,29 +900,42 @@ function Lobby({ gs, pid, code, isHost, startGame, leave, writeGs }) {
   const [suggestions, setSuggestions] = useState<string[]>([]);
   const [genError, setGenError] = useState("");
 
-  // Anthropic key — stored in localStorage, host-only
-  const [anthropicKey, setAnthropicKey] = useState("");
+  // Gemini key — stored in localStorage AND room state so all players can use it
+  const [geminiKey, setGeminiKey] = useState("");
   const [keyInput, setKeyInput] = useState("");
   const [editingKey, setEditingKey] = useState(false);
   useEffect(() => {
-    const saved = localStorage.getItem("gifbattle_anthropic_key") || "";
-    setAnthropicKey(saved);
+    const saved = localStorage.getItem("gifbattle_gemini_key") || gs.geminiKey || "";
+    setGeminiKey(saved);
     setKeyInput(saved);
   }, []);
-  const saveKey = () => {
+  const saveKey = async () => {
     const k = keyInput.trim();
-    localStorage.setItem("gifbattle_anthropic_key", k);
-    setAnthropicKey(k);
+    localStorage.setItem("gifbattle_gemini_key", k);
+    setGeminiKey(k);
     setEditingKey(false);
     setGenError("");
+    if (isHost) await writeGs({ ...gs, geminiKey: k });
   };
-  const clearKey = () => {
-    localStorage.removeItem("gifbattle_anthropic_key");
-    setAnthropicKey("");
+  const clearKey = async () => {
+    localStorage.removeItem("gifbattle_gemini_key");
+    setGeminiKey("");
     setKeyInput("");
     setEditingKey(false);
+    if (isHost) await writeGs({ ...gs, geminiKey: "" });
   };
   const maskKey = (k: string) => k.length > 8 ? k.slice(0, 7) + "…" + k.slice(-4) : "••••••••";
+
+  const GEMINI_MODELS = [
+    { id: "gemini-2.0-flash-exp", label: "2.0 Flash" },
+    { id: "gemini-1.5-flash", label: "1.5 Flash" },
+    { id: "gemini-1.5-pro", label: "1.5 Pro" },
+  ];
+  const currentModel = gs.geminiModel || "gemini-2.0-flash-exp";
+  const setGeminiModel = async (m: string) => {
+    if (!isHost) return;
+    await writeGs({ ...gs, geminiModel: m });
+  };
 
   const copy = () => { try{navigator.clipboard.writeText(code);}catch{} setCopied(true); setTimeout(()=>setCopied(false),2000); };
   const maxC = gs.maxCompetitors ?? 4;
@@ -982,11 +996,11 @@ function Lobby({ gs, pid, code, isHost, startGame, leave, writeGs }) {
       const res = await fetch("/api/generate-prompts", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ playerNames: gs.players.map(p => p.nickname), apiKey: anthropicKey || undefined }),
+        body: JSON.stringify({ playerNames: gs.players.map(p => p.nickname), apiKey: geminiKey || undefined, model: currentModel }),
       });
       const data = await res.json();
       if (data.error === "not configured") {
-        setGenError("No API key set — enter your Anthropic key below");
+        setGenError("No API key set — enter your Gemini key below");
         setEditingKey(true);
       } else if (data.error === "invalid key") {
         setGenError("Invalid API key — check and re-enter it below");
@@ -1094,19 +1108,19 @@ function Lobby({ gs, pid, code, isHost, startGame, leave, writeGs }) {
                 </button>
               </div>
 
-              {/* Anthropic key config */}
+              {/* Gemini key config */}
               <div style={{background:`${C.bg}88`,borderRadius:8,padding:"10px 12px",marginBottom:10}}>
-                <div style={{fontSize:11,color:C.muted,letterSpacing:2,marginBottom:6}}>ANTHROPIC API KEY</div>
+                <div style={{fontSize:11,color:C.muted,letterSpacing:2,marginBottom:6}}>GEMINI API KEY</div>
                 {!editingKey ? (
                   <div style={{display:"flex",alignItems:"center",gap:8}}>
-                    <span style={{fontSize:13,flex:1,color:anthropicKey?C.green:C.muted}}>
-                      {anthropicKey ? "✓ " + maskKey(anthropicKey) : "Not set"}
+                    <span style={{fontSize:13,flex:1,color:geminiKey?C.green:C.muted}}>
+                      {geminiKey ? "✓ " + maskKey(geminiKey) : "Not set"}
                     </span>
-                    <button onClick={()=>{setKeyInput(anthropicKey);setEditingKey(true);}}
+                    <button onClick={()=>{setKeyInput(geminiKey);setEditingKey(true);}}
                       style={{...g.btnSm,background:C.card2,color:C.text,border:`1px solid ${C.muted}44`}}>
-                      {anthropicKey ? "Change" : "Set Key"}
+                      {geminiKey ? "Change" : "Set Key"}
                     </button>
-                    {anthropicKey && (
+                    {geminiKey && (
                       <button onClick={clearKey}
                         style={{...g.btnSm,background:`${C.accent}18`,color:C.accent,border:"none"}}>
                         Clear
@@ -1118,10 +1132,10 @@ function Lobby({ gs, pid, code, isHost, startGame, leave, writeGs }) {
                     <input
                       style={{...g.inp,marginBottom:8,fontFamily:"monospace",fontSize:13}}
                       type="password"
-                      placeholder="sk-ant-…"
+                      placeholder="AIza…"
                       value={keyInput}
                       onChange={e=>setKeyInput(e.target.value)}
-                      onKeyDown={e=>{if(e.key==="Enter")saveKey();if(e.key==="Escape"){setEditingKey(false);setKeyInput(anthropicKey);}}}
+                      onKeyDown={e=>{if(e.key==="Enter")saveKey();if(e.key==="Escape"){setEditingKey(false);setKeyInput(geminiKey);}}}
                       autoFocus
                     />
                     <div style={{display:"flex",gap:8}}>
@@ -1129,13 +1143,34 @@ function Lobby({ gs, pid, code, isHost, startGame, leave, writeGs }) {
                         style={{...g.btnSm,flex:1,background:`linear-gradient(135deg, ${C.accent}, ${C.cyan})`,color:"#fff"}}>
                         Save
                       </button>
-                      <button onClick={()=>{setEditingKey(false);setKeyInput(anthropicKey);}}
+                      <button onClick={()=>{setEditingKey(false);setKeyInput(geminiKey);}}
                         style={{...g.btnSm,background:C.card2,color:C.text,border:`1px solid ${C.muted}44`}}>
                         Cancel
                       </button>
                     </div>
                   </div>
                 )}
+                {/* Model selector */}
+                <div style={{marginTop:10}}>
+                  <div style={{fontSize:11,color:C.muted,letterSpacing:2,marginBottom:6}}>MODEL</div>
+                  <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
+                    {GEMINI_MODELS.map(m => (
+                      <button key={m.id} onClick={()=>setGeminiModel(m.id)}
+                        style={{...g.btnSm,
+                          background:currentModel===m.id?`linear-gradient(135deg, ${C.accent}, ${C.cyan})`:C.card2,
+                          color:currentModel===m.id?"#fff":C.text,
+                          border:currentModel===m.id?"none":`1px solid ${C.muted}44`,
+                          opacity:isHost?1:0.7,cursor:isHost?"pointer":"default"}}>
+                        {m.label}
+                      </button>
+                    ))}
+                  </div>
+                  {currentModel !== "gemini-2.0-flash-exp" && (
+                    <div style={{fontSize:11,color:C.yellow,marginTop:4}}>
+                      ⚠ Image generation requires 2.0 Flash
+                    </div>
+                  )}
+                </div>
               </div>
 
               <button
@@ -1228,7 +1263,7 @@ function Lobby({ gs, pid, code, isHost, startGame, leave, writeGs }) {
 function Submit({ gs, pid, apiKey, writeGs, fetchGs, transitioning, transitionToVoting, isHost }) {
   const { C, g } = useContext(ThemeCtx);
   const rounds = getRounds(gs);
-  const subs = (gs.submissions || {}) as Record<string, Array<{url:string, preview:string}>>;
+  const subs = (gs.submissions || {}) as Record<string, Array<Submission>>;
   const myAssignedRounds = getAssignedRoundIndexes(gs, pid);
   const mySubmissions = subs[pid];
   const myDoneCount = countSubmittedRounds(mySubmissions, myAssignedRounds);
@@ -1236,6 +1271,7 @@ function Submit({ gs, pid, apiKey, writeGs, fetchGs, transitioning, transitionTo
   const currentRoundIndex = myAssignedRounds.find(ri => mySubmissions?.[ri] == null) ?? null;
   const isDone = currentRoundIndex == null || myDoneCount >= myTargetCount;
   const currentMeta = currentRoundIndex == null ? null : getRoundPlan(gs)[currentRoundIndex];
+  const currentPrompt = currentRoundIndex == null ? "" : (gs.prompts as string[])?.[currentRoundIndex] ?? "";
 
   const [query, setQuery] = useState("");
   const [gifs, setGifs] = useState<Array<{id:string,url:string,preview:string}>>([]);
@@ -1245,6 +1281,11 @@ function Submit({ gs, pid, apiKey, writeGs, fetchGs, transitioning, transitionTo
   const [searching, setSearching] = useState(false);
   const [searchErr, setSearchErr] = useState("");
   const searchQ = useRef<ReturnType<typeof setTimeout>|null>(null);
+  const [activeTab, setActiveTab] = useState<"giphy"|"write">("giphy");
+  const [textStyle, setTextStyle] = useState("random");
+  const [generating, setGenerating] = useState(false);
+  const [genError, setGenError] = useState("");
+  const [genImageUrl, setGenImageUrl] = useState<string|null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
   const sentinelRef = useRef<HTMLDivElement>(null);
   const timerRef = useRef<ReturnType<typeof setInterval>|null>(null);
@@ -1277,6 +1318,9 @@ function Submit({ gs, pid, apiKey, writeGs, fetchGs, transitioning, transitionTo
     setHasMore(false);
     setSel(null);
     setSearchErr("");
+    setGenError("");
+    setGenImageUrl(null);
+    setGenerating(false);
   }, [currentRoundIndex]);
 
   const doSearch = async (q: string) => {
@@ -1324,6 +1368,42 @@ function Submit({ gs, pid, apiKey, writeGs, fetchGs, transitioning, transitionTo
     return () => observer.disconnect();
   }, [hasMore, searching, gifs.length]);
 
+  const STYLES = [
+    { key: "random", label: "🎲 Random" },
+    { key: "anime", label: "Anime" },
+    { key: "watercolor", label: "Watercolor" },
+    { key: "pixel", label: "Pixel Art" },
+    { key: "oil", label: "Oil Painting" },
+    { key: "neon", label: "Neon" },
+    { key: "minimal", label: "Minimal" },
+    { key: "vintage", label: "Vintage" },
+    { key: "comic", label: "Comic" },
+  ];
+
+  const generateImage = async () => {
+    if (!query.trim()) return;
+    const key = gs.geminiKey || "";
+    if (!key) { setGenError("No Gemini key set — ask the host to add one in the lobby"); return; }
+    setGenerating(true);
+    setGenError("");
+    setGenImageUrl(null);
+    try {
+      const res = await fetch("/api/generate-image", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ textAnswer: query, gamePrompt: currentPrompt, style: textStyle, apiKey: key }),
+      });
+      const data = await res.json();
+      if (data.error === "invalid_key") { setGenError("Invalid Gemini key — ask the host to update it in the lobby"); return; }
+      if (data.error || !data.url) { setGenError("Generation failed — try again"); return; }
+      setGenImageUrl(data.url);
+    } catch {
+      setGenError("Generation failed — check your connection");
+    } finally {
+      setGenerating(false);
+    }
+  };
+
   const onQ = (e: React.ChangeEvent<HTMLInputElement>) => {
     const v = e.target.value;
     setQuery(v);
@@ -1332,15 +1412,15 @@ function Submit({ gs, pid, apiKey, writeGs, fetchGs, transitioning, transitionTo
     else { setGifs([]); setHasMore(false); setOffset(0); setSearchErr(""); }
   };
 
-  const submit = async () => {
-    if (!sel || currentRoundIndex == null) return;
+  const submitSub = async (sub: Submission) => {
+    if (currentRoundIndex == null) return;
     const fresh = await fetchGs() || gs;
-    const existing = ((fresh.submissions || {}) as Record<string, Array<{url:string,preview:string}>>)[pid] || [];
+    const existing = ((fresh.submissions || {}) as Record<string, Array<Submission>>)[pid] || [];
     const freshAssignedRounds = getAssignedRoundIndexes(fresh, pid);
     const submitAt = freshAssignedRounds.find(ri => existing?.[ri] == null);
     if (submitAt == null) return;
     const newArr = [...existing];
-    newArr[submitAt] = { url: sel.url, preview: sel.preview };
+    newArr[submitAt] = sub;
     const newSubmissions = { ...fresh.submissions, [pid]: newArr };
     const prevDone: string[] = fresh.doneSubmitting || [];
     const nowDone = countSubmittedRounds(newArr, freshAssignedRounds) >= freshAssignedRounds.length;
@@ -1360,6 +1440,9 @@ function Submit({ gs, pid, apiKey, writeGs, fetchGs, transitioning, transitionTo
       await writeGs(newState);
     }
   };
+  const submit = () => { if (!sel) return; submitSub({ type: "giphy", url: sel.url, preview: sel.preview }); };
+  const submitText = () => { if (!query.trim()) return; submitSub({ type: "text", textAnswer: query.trim() }); };
+  const submitAI = () => { if (!genImageUrl || !query.trim()) return; submitSub({ type: "ai", url: genImageUrl, textAnswer: query.trim() }); };
 
   const forceStart = async () => {
     if (transitioning.current) return;
@@ -1416,7 +1499,6 @@ function Submit({ gs, pid, apiKey, writeGs, fetchGs, transitioning, transitionTo
   }
 
   // Active submission screen
-  const currentPrompt = currentRoundIndex == null ? "" : (gs.prompts as string[])?.[currentRoundIndex] ?? "";
   return (
     <div style={g.pageTop}>
       <div style={{...g.wCard,marginTop:20}}>
@@ -1433,38 +1515,118 @@ function Submit({ gs, pid, apiKey, writeGs, fetchGs, transitioning, transitionTo
           </div>
         </div>
         <div style={g.prompt}>"{currentPrompt}"</div>
-        <input style={g.inp} placeholder="Search for a GIF…" value={query} onChange={onQ} autoFocus/>
-        {gifs.length > 0 && (
-          <div ref={scrollRef} style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:6,maxHeight:300,overflowY:"auto",marginBottom:12}}>
-            {gifs.map(gif => (
-              <div key={gif.id} onClick={() => setSel(gif)}
-                style={{position:"relative",paddingBottom:"100%",borderRadius:8,overflow:"hidden",cursor:"pointer",
-                  border:sel?.id===gif.id?`3px solid ${C.accent}`:"3px solid transparent",
-                  boxShadow:sel?.id===gif.id?`0 0 12px ${C.accent}66`:"none",
-                  transition:"border-color 0.15s, box-shadow 0.15s"}}>
-                <div style={{position:"absolute",inset:0}}>
-                  <GifImg url={gif.preview} style={{width:"100%",height:"100%"}} fit="contain"/>
-                </div>
+
+        {/* Shared text area */}
+        <textarea
+          style={{...g.inp, resize:"none", height:64, marginBottom:10} as React.CSSProperties}
+          placeholder="Type your answer…"
+          value={query}
+          onChange={e => {
+            const v = e.target.value;
+            setQuery(v);
+            if (activeTab === "giphy") {
+              clearTimeout(searchQ.current!);
+              if (v.trim().length > 1) searchQ.current = setTimeout(() => doSearch(v), 500);
+              else { setGifs([]); setHasMore(false); setOffset(0); setSearchErr(""); }
+            }
+            setGenImageUrl(null);
+            setGenError("");
+          }}
+          autoFocus
+        />
+
+        {/* Tab toggle */}
+        <div style={{display:"flex",gap:0,marginBottom:12,borderRadius:8,overflow:"hidden",border:`1px solid ${C.muted}33`}}>
+          {(apiKey ? ["giphy","write"] : ["write"]).map(tab => (
+            <button key={tab} onClick={()=>setActiveTab(tab as "giphy"|"write")}
+              style={{flex:1,padding:"8px 0",fontSize:12,fontWeight:700,letterSpacing:1,cursor:"pointer",border:"none",
+                background:activeTab===tab?`linear-gradient(135deg, ${C.accent}, ${C.cyan})`:C.card2,
+                color:activeTab===tab?"#fff":C.muted,
+                transition:"background 0.15s, color 0.15s"}}>
+              {tab==="giphy"?"Search GIFs":"Write Answer"}
+            </button>
+          ))}
+        </div>
+
+        {/* Search GIFs tab */}
+        {activeTab === "giphy" && (
+          <>
+            {gifs.length > 0 && (
+              <div ref={scrollRef} style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:6,maxHeight:300,overflowY:"auto",marginBottom:12}}>
+                {gifs.map(gif => (
+                  <div key={gif.id} onClick={() => setSel(gif)}
+                    style={{position:"relative",paddingBottom:"100%",borderRadius:8,overflow:"hidden",cursor:"pointer",
+                      border:sel?.id===gif.id?`3px solid ${C.accent}`:"3px solid transparent",
+                      boxShadow:sel?.id===gif.id?`0 0 12px ${C.accent}66`:"none",
+                      transition:"border-color 0.15s, box-shadow 0.15s"}}>
+                    <div style={{position:"absolute",inset:0}}>
+                      <GifImg url={gif.preview} style={{width:"100%",height:"100%"}} fit="contain"/>
+                    </div>
+                  </div>
+                ))}
+                {hasMore && !searching && (
+                  <div ref={sentinelRef} style={{height:20,gridColumn:"1 / -1"}}/>
+                )}
               </div>
-            ))}
-            {hasMore && !searching && (
-              <div ref={sentinelRef} style={{height:20,gridColumn:"1 / -1"}}/>
             )}
-          </div>
+            {searching && <div style={g.info}>Searching…</div>}
+            {searchErr && !searching && <div style={g.err}>⚠ {searchErr}</div>}
+            <PoweredByGiphy/>
+            {sel && (
+              <div style={{textAlign:"center",marginBottom:12}}>
+                <div style={{fontSize:10,color:C.muted,letterSpacing:3,marginBottom:6,fontWeight:600}}>SELECTED</div>
+                <GifImg url={sel.preview} style={{width:200,height:150,borderRadius:8,margin:"0 auto",border:`2px solid ${C.accent}`,boxShadow:`0 0 20px ${C.accent}44`}}/>
+              </div>
+            )}
+            <button className="gbtn" style={{...g.btn,...(sel?g.btnP:{background:C.card2,color:C.muted}),cursor:sel?"pointer":"not-allowed",marginBottom:0}}
+              onClick={submit} disabled={!sel}>
+              {sel?"Submit GIF":"Select a GIF first"}
+            </button>
+          </>
         )}
-        {searching && <div style={g.info}>Searching…</div>}
-        {searchErr && !searching && <div style={g.err}>⚠ {searchErr}</div>}
-        <PoweredByGiphy/>
-        {sel && (
-          <div style={{textAlign:"center",marginBottom:12}}>
-            <div style={{fontSize:10,color:C.muted,letterSpacing:3,marginBottom:6,fontWeight:600}}>SELECTED</div>
-            <GifImg url={sel.preview} style={{width:200,height:150,borderRadius:8,margin:"0 auto",border:`2px solid ${C.accent}`,boxShadow:`0 0 20px ${C.accent}44`}}/>
-          </div>
+
+        {/* Write Answer tab */}
+        {activeTab === "write" && (
+          <>
+            <div style={{marginBottom:12}}>
+              <div style={{fontSize:11,color:C.muted,letterSpacing:2,marginBottom:6}}>IMAGE STYLE</div>
+              <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
+                {STYLES.map(s => (
+                  <button key={s.key} onClick={()=>{ setTextStyle(s.key); setGenImageUrl(null); setGenError(""); }}
+                    style={{...g.btnSm,
+                      background:textStyle===s.key?`linear-gradient(135deg, ${C.accent}, ${C.cyan})`:C.card2,
+                      color:textStyle===s.key?"#fff":C.text,
+                      border:textStyle===s.key?"none":`1px solid ${C.muted}44`}}>
+                    {s.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+            {genImageUrl && (
+              <div style={{textAlign:"center",marginBottom:12}}>
+                <div style={{fontSize:10,color:C.muted,letterSpacing:3,marginBottom:6,fontWeight:600}}>GENERATED IMAGE</div>
+                <img src={genImageUrl} alt="AI generated"
+                  style={{width:200,height:150,objectFit:"cover",borderRadius:8,margin:"0 auto",display:"block",
+                    border:`2px solid ${C.accent}`,boxShadow:`0 0 20px ${C.accent}44`}}/>
+              </div>
+            )}
+            {genError && <div style={g.err}>⚠ {genError}</div>}
+            <div style={{display:"flex",gap:8,marginBottom:0}}>
+              <button className="gbtn"
+                style={{...g.btn,...g.btnS,flex:1,marginBottom:0,opacity:generating||!query.trim()?0.6:1}}
+                onClick={generateImage}
+                disabled={generating || !query.trim()}>
+                {generating ? "✨ Generating…" : genImageUrl ? "✨ Regenerate" : "✨ Generate Image"}
+              </button>
+              <button className="gbtn"
+                style={{...g.btn,...(query.trim()?g.btnP:{background:C.card2,color:C.muted}),flex:1,marginBottom:0,cursor:query.trim()?"pointer":"not-allowed"}}
+                onClick={genImageUrl ? submitAI : submitText}
+                disabled={!query.trim()}>
+                {genImageUrl ? "Submit with Image" : query.trim() ? "Submit as Text" : "Type an answer first"}
+              </button>
+            </div>
+          </>
         )}
-        <button className="gbtn" style={{...g.btn,...(sel?g.btnP:{background:C.card2,color:C.muted}),cursor:sel?"pointer":"not-allowed",marginBottom:0}}
-          onClick={submit} disabled={!sel}>
-          {sel?"Submit GIF":"Select a GIF first"}
-        </button>
       </div>
     </div>
   );
@@ -1542,7 +1704,7 @@ function Voting({ gs, pid, code, isHost, fetchGs, writeGs, transitioning, advanc
 
   const vSecs = gs.voteSecs ?? VOTE_SECS;
   const tc=t<=vSecs*0.35?C.accent:t<=vSecs*0.65?C.yellow:C.green;
-  const subs = (gs.submissions || {}) as Record<string, Array<{url:string, preview:string}>>;
+  const subs = (gs.submissions || {}) as Record<string, Array<Submission>>;
   const lSub = subs[lId]?.[gs.votingRound];
   const rSub = subs[rId]?.[gs.votingRound];
   const currentPrompt = (gs.prompts as string[])?.[gs.votingRound] ?? "";
@@ -1552,17 +1714,41 @@ function Voting({ gs, pid, code, isHost, fetchGs, writeGs, transitioning, advanc
     const isTie=showRes&&lv===rv;
     const myVoteThis=myVote===side;
     const voteCount=side==="left"?lv:rv;
+    const subType = sub?.type || (sub?.url ? "giphy" : null);
     return(
       <div className="gif-vote-card" style={{display:"flex",flexDirection:"column",alignItems:"center",gap:10}}>
-        <div style={{borderRadius:12,overflow:"hidden",width:"100%",
+        <div style={{borderRadius:12,overflow:"hidden",width:"100%",position:"relative",
           border:showRes?isWinner?`3px solid ${C.green}`:isTie?`3px solid ${C.yellow}`:"3px solid transparent"
             :myVoteThis?`3px solid ${C.accent}`:"3px solid transparent",
           boxShadow:showRes&&isWinner?`0 0 24px ${C.green}55`:myVoteThis?`0 0 16px ${C.accent}44`:"none",
           transition:"border-color 0.2s, box-shadow 0.2s"}}>
-          {sub
-            ?<GifImg className="vote-gif" url={sub.url} style={{width:"100%",height:220}}/>
-            :<div className="vote-gif" style={{height:220,background:C.card2,display:"flex",alignItems:"center",justifyContent:"center",color:C.muted}}>No GIF</div>}
+          {subType === "text"
+            ? <div className="vote-gif" style={{height:220,background:`linear-gradient(135deg, ${C.accent}22, ${C.cyan}18)`,
+                display:"flex",alignItems:"center",justifyContent:"center",padding:"16px",
+                border:`1px solid ${C.accent}33`}}>
+                <div style={{fontSize:18,fontWeight:700,textAlign:"center",color:C.text,lineHeight:1.4,fontStyle:"italic"}}>
+                  "{sub.textAnswer}"
+                </div>
+              </div>
+            : subType === "ai" && sub.url
+            ? <div style={{position:"relative"}}>
+                <img src={sub.url} alt="AI generated" className="vote-gif"
+                  style={{width:"100%",height:220,objectFit:"cover",display:"block"}}/>
+                <div style={{position:"absolute",top:6,right:6,background:`${C.bg}cc`,
+                  borderRadius:6,padding:"2px 6px",fontSize:10,color:C.cyan,fontWeight:700,letterSpacing:1}}>
+                  ✨ AI
+                </div>
+              </div>
+            : sub?.url
+            ? <GifImg className="vote-gif" url={sub.url} style={{width:"100%",height:220}}/>
+            : <div className="vote-gif" style={{height:220,background:C.card2,display:"flex",alignItems:"center",justifyContent:"center",color:C.muted}}>No submission</div>}
         </div>
+        {subType === "ai" && sub?.textAnswer && (
+          <div style={{fontSize:12,color:C.muted,textAlign:"center",fontStyle:"italic",maxWidth:"100%",
+            overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>
+            "{sub.textAnswer}"
+          </div>
+        )}
         {showRes&&(
           <div style={{fontWeight:900,fontSize:18,fontFamily:"'Bebas Neue', sans-serif",letterSpacing:1,color:isWinner?C.green:isTie?C.yellow:C.muted}}>
             {voteCount} {voteCount!==1?"VOTES":"VOTE"}{isWinner?" 🏆":isTie?" 🤝":""}
@@ -1605,7 +1791,7 @@ function Voting({ gs, pid, code, isHost, fetchGs, writeGs, transitioning, advanc
           </div>
           <GifCard sub={rSub} id={rId} side="right"/>
         </div>
-        <PoweredByGiphy/>
+        {(lSub?.type === "giphy" || rSub?.type === "giphy" || (!lSub?.type && lSub?.url) || (!rSub?.type && rSub?.url)) && <PoweredByGiphy/>}
         <div style={{textAlign:"center",color:C.muted,fontSize:13,marginTop:8}}>
           {showRes?(lv>rv?"Left wins! ✨":rv>lv?"Right wins! ✨":"Tie! Both get a point 🤝")+" Next up soon…"
             :inMatchup?"Your GIF is in this matchup — sit tight!"
@@ -1691,7 +1877,20 @@ function GameOver({ gs, writeGs, pid }) {
   const sorted=[...gs.players].sort((a,b)=>b.score-a.score);
   const medals=["🥇","🥈","🥉"];
   const prompts = (gs.prompts || []) as string[];
-  const subs = (gs.submissions || {}) as Record<string, Array<{url:string, preview:string}>>;
+  const subs = (gs.submissions || {}) as Record<string, Array<Submission>>;
+  useEffect(() => {
+    const blobUrls = Object.values(gs.submissions || {})
+      .flat()
+      .filter((s: Submission) => s?.type === "ai" && s?.url)
+      .map((s: Submission) => s.url as string);
+    if (blobUrls.length > 0) {
+      fetch("/api/cleanup-images", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ urls: blobUrls }),
+      }).catch(() => {});
+    }
+  }, []);
   const plan = getRoundPlan(gs);
   const playerNameById = new Map<string, string>(
     ((gs.players || []) as Array<{ id: string; nickname: string }>).map((p) => [p.id, p.nickname])
@@ -1775,9 +1974,29 @@ function GameOver({ gs, writeGs, pid }) {
                   return (
                     <div key={`${row.idx}-${playerId}`} style={{background:C.card,borderRadius:8,padding:"8px",border:`1px solid ${C.muted}22`}}>
                       <div style={{fontSize:11,fontWeight:700,marginBottom:6,color:C.muted,letterSpacing:1}}>{nick.toUpperCase()}</div>
-                      {sub?.url
+                      {sub?.type === "text"
+                        ? <div style={{height:130,background:`linear-gradient(135deg, ${C.accent}18, ${C.cyan}12)`,borderRadius:6,
+                            display:"flex",alignItems:"center",justifyContent:"center",padding:10,
+                            border:`1px solid ${C.accent}22`}}>
+                            <div style={{fontSize:13,fontWeight:600,color:C.text,textAlign:"center",fontStyle:"italic",lineHeight:1.4}}>
+                              "{sub.textAnswer}"
+                            </div>
+                          </div>
+                        : sub?.type === "ai" && sub?.url
+                        ? <div style={{position:"relative"}}>
+                            <img src={sub.url} alt="AI" style={{height:130,width:"100%",objectFit:"cover",borderRadius:6,display:"block"}}/>
+                            <div style={{position:"absolute",top:4,right:4,background:`${C.bg}cc`,borderRadius:4,
+                              padding:"1px 5px",fontSize:9,color:C.cyan,fontWeight:700,letterSpacing:1}}>✨ AI</div>
+                            {sub.textAnswer && (
+                              <div style={{fontSize:10,color:C.muted,marginTop:4,fontStyle:"italic",textAlign:"center",
+                                overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>
+                                "{sub.textAnswer}"
+                              </div>
+                            )}
+                          </div>
+                        : sub?.url
                         ? <GifImg url={sub.url} style={{height:130,borderRadius:6}} fit="cover"/>
-                        : <div style={{height:130,background:C.card2,borderRadius:6,display:"flex",alignItems:"center",justifyContent:"center",color:C.muted,fontSize:12}}>No GIF</div>}
+                        : <div style={{height:130,background:C.card2,borderRadius:6,display:"flex",alignItems:"center",justifyContent:"center",color:C.muted,fontSize:12}}>No submission</div>}
                     </div>
                   );
                 })}
