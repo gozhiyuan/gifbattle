@@ -114,13 +114,13 @@ const handleRoomJoinRequest = async (
 
   if (room.phase !== "lobby") return json(route, 409, { error: "not_in_lobby" });
 
-  const players = Array.isArray(room.players) ? room.players as Array<{ id: string }> : [];
-  if (players.find((p) => p.id === pid)) return json(route, 200, { ok: true, code });
+  const players = Array.isArray(room.players) ? room.players as Array<Record<string, unknown>> : [];
+  if (players.find((p) => p["id"] === pid)) return json(route, 200, { ok: true, code });
 
   const max = typeof room.maxCompetitors === "number" ? room.maxCompetitors : 12;
   if (players.length >= max) return json(route, 409, { error: "room_full" });
 
-  players.push({ id: pid, nickname, score: 0 } as never);
+  players.push({ id: pid, nickname, score: 0 });
   room.players = players;
   store.set(key, JSON.stringify(room));
   return json(route, 200, { ok: true, code });
