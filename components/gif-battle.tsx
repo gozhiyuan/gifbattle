@@ -837,8 +837,9 @@ export default function App() {
             return setErr("Cannot join this room");
           }
           if (res.status === 429) {
-            const d = await res.json();
-            return setErr(`Too many attempts — try again in ${d.retryAfterSec}s`);
+            let d: { retryAfterSec?: number } = {};
+            try { d = await res.json(); } catch {}
+            return setErr(`Too many attempts — try again in ${d.retryAfterSec ?? "a moment"}`);
           }
           if (!res.ok) return setErr("Failed to join — check the code");
           try {
