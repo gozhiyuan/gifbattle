@@ -677,7 +677,7 @@ export default function App() {
 
     const tasks: Array<Promise<unknown>> = [];
     if (!cleanupState.base) {
-      try { localStorage.removeItem("gifbattle_gemini_key"); } catch {}
+      try { sessionStorage.removeItem("gifbattle_gemini_key"); } catch {}
       tasks.push(
         fetch("/api/gemini-key", {
           method: "POST",
@@ -1023,13 +1023,14 @@ function Lobby({ gs, pid, code, isHost, startGame, leave, writeGs }) {
   const promptSlowRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   useEffect(() => () => { clearTimeout(promptSlowRef.current!); }, []);
 
-  // Gemini key is stored only in host localStorage + server-side secret storage.
+  // Gemini key is stored only in host sessionStorage + server-side secret storage.
   const [geminiKey, setGeminiKey] = useState("");
   const [keyInput, setKeyInput] = useState("");
   const [roomKeySet, setRoomKeySet] = useState(false);
   const [editingKey, setEditingKey] = useState(false);
   useEffect(() => {
-    const saved = localStorage.getItem("gifbattle_gemini_key") || "";
+    let saved = "";
+    try { saved = sessionStorage.getItem("gifbattle_gemini_key") || ""; } catch {}
     setGeminiKey(saved);
     setKeyInput(saved);
     if (!isHost) return;
@@ -1040,7 +1041,7 @@ function Lobby({ gs, pid, code, isHost, startGame, leave, writeGs }) {
   }, [code, isHost, pid]);
   const saveKey = async () => {
     const k = keyInput.trim();
-    localStorage.setItem("gifbattle_gemini_key", k);
+    try { sessionStorage.setItem("gifbattle_gemini_key", k); } catch {}
     setGeminiKey(k);
     setEditingKey(false);
     setGenError("");
@@ -1062,7 +1063,7 @@ function Lobby({ gs, pid, code, isHost, startGame, leave, writeGs }) {
     }
   };
   const clearKey = async () => {
-    localStorage.removeItem("gifbattle_gemini_key");
+    try { sessionStorage.removeItem("gifbattle_gemini_key"); } catch {}
     setGeminiKey("");
     setKeyInput("");
     setEditingKey(false);
@@ -1176,6 +1177,12 @@ function Lobby({ gs, pid, code, isHost, startGame, leave, writeGs }) {
         setLlmCreateStatus({ ok: false, message: "LLM could not create custom questions." });
       } else if (data.error === "generation_busy") {
         setGenError("Gemini is currently busy. Please retry in a few seconds.");
+        setLlmCreateStatus({ ok: false, message: "LLM could not create custom questions." });
+      } else if (data.error === "generation_failed") {
+        setGenError("Prompt generation failed due to a provider error. Please retry.");
+        setLlmCreateStatus({ ok: false, message: "LLM could not create custom questions." });
+      } else if (data.error === "invalid_request") {
+        setGenError("Prompt generation request was invalid. Please refresh and try again.");
         setLlmCreateStatus({ ok: false, message: "LLM could not create custom questions." });
       } else if (data.error === "forbidden") {
         setGenError("Room authorization failed — try rejoining");
@@ -2106,7 +2113,7 @@ function GameOver({ gs, writeGs, pid, runEndGameCleanup }) {
   const [downloadErr, setDownloadErr] = useState("");
   useEffect(() => {
     if (pid !== gs.host) return;
-    try { localStorage.removeItem("gifbattle_gemini_key"); } catch {}
+    try { sessionStorage.removeItem("gifbattle_gemini_key"); } catch {}
     fetch("/api/gemini-key", {
       method: "POST",
       headers: { "Content-Type": "application/json" },

@@ -71,11 +71,23 @@ Alternatively, use the [Upstash integration on Vercel Marketplace](https://verce
 
 ```
 app/
-  layout.tsx          Root HTML shell
-  page.tsx            Renders the game component
-  api/store/route.ts  GET/POST shared KV store (backed by Upstash Redis)
+  layout.tsx                       Root HTML shell
+  page.tsx                         Renders the game component
+  api/store/route.ts               GET/POST/DELETE shared KV store (Upstash Redis)
+  api/gemini-key/route.ts          Host-only Gemini key management
+  api/generate-prompts/route.ts    AI prompt generation (Gemini)
+  api/generate-image/route.ts      AI image generation (Gemini + Vercel Blob)
+  api/cleanup-images/route.ts      Host-only Vercel Blob deletion at game end
 components/
-  gif-battle.tsx      Game logic and UI
+  gif-battle.tsx      Game logic and UI (single file — keep it that way)
+lib/
+  room-security.ts    Server-side auth, rate limiting, Gemini key storage
+  gemini-retry.ts     Fetch wrapper with exponential backoff for Gemini API
+tests/
+  smoke.spec.ts                    Page load smoke check
+  e2e/home-validation.spec.ts      Nickname/room code validation
+  e2e/lobby-multiplayer.spec.ts    Host + guest join flow (mocked API)
+  e2e/helpers/mock-api.ts          Playwright API mock helpers
 ```
 
 ## Environment variables

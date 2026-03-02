@@ -32,6 +32,7 @@ const RATE_LIMITS: Record<RateBucket, RateLimitConfig> = {
 };
 const MINUTE_MS = 60 * 1000;
 const HOUR_MS = 60 * 60 * 1000;
+const VERCEL_BLOB_HOST_PATTERN = /(^|\.)public\.blob\.vercel-storage\.com$/i;
 
 const toRoomState = (raw: unknown): RoomState | null => {
   if (raw == null) return null;
@@ -83,9 +84,13 @@ const secondsUntilReset = (nowMs: number, windowMs: number) =>
   Math.max(1, Math.ceil((windowMs - (nowMs % windowMs)) / 1000));
 
 const incrWithTtl = async (key: string, ttlSec: number) => {
-  const n = await redis.incr(key);
-  if (n === 1) await redis.expire(key, ttlSec);
-  return Number(n);
+  // MULTI keeps INCR + EXPIRE together to avoid stranded keys without TTL.
+  const tx = redis.multi();
+  tx.incr(key);
+  tx.expire(key, ttlSec);
+  const result = await tx.exec();
+  const first = Array.isArray(result) ? result[0] : 0;
+  return Number(Array.isArray(first) ? first[1] : first);
 };
 
 export async function checkRoomRateLimit(
@@ -131,6 +136,7 @@ export const isManagedAiBlobUrl = (url: string): boolean => {
   try {
     const u = new URL(url);
     if (u.protocol !== "https:") return false;
+    if (!VERCEL_BLOB_HOST_PATTERN.test(u.hostname)) return false;
     const filename = u.pathname.split("/").pop() || "";
     return filename.startsWith("gifbattle-ai-");
   } catch {

@@ -85,7 +85,7 @@ export async function POST(req: NextRequest) {
     pid = body.pid ?? "";
     model = body.model ?? DEFAULT_MODEL;
   } catch {
-    return NextResponse.json({ prompts: [] });
+    return NextResponse.json({ error: "invalid_request" }, { status: 400 });
   }
 
   if (!roomCode || !pid) {
@@ -99,7 +99,7 @@ export async function POST(req: NextRequest) {
 
   const apiKey = await getRoomGeminiKey(roomCode);
   if (!apiKey) {
-    return NextResponse.json({ error: "not configured" });
+    return NextResponse.json({ error: "not configured" }, { status: 400 });
   }
   if (!ALLOWED_MODELS.has(model)) model = DEFAULT_MODEL;
   const limit = await checkRoomRateLimit(roomCode, "prompt");
@@ -123,10 +123,13 @@ export async function POST(req: NextRequest) {
 
   try {
     const res = await fetchWithRetry(
-      `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`,
+      `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`,
       {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: {
+          "Content-Type": "application/json",
+          "x-goog-api-key": apiKey,
+        },
         body: JSON.stringify({
           contents: [{ parts: [{ text: userContent }] }],
           systemInstruction: { parts: [{ text: systemInstruction }] },
@@ -154,15 +157,15 @@ export async function POST(req: NextRequest) {
         providerStatus === "UNAUTHENTICATED" ||
         /api key|auth|permission/i.test(providerMsg)
       ) {
-        return NextResponse.json({ error: "invalid key" });
+        return NextResponse.json({ error: "invalid key" }, { status: 401 });
       }
       if (res.status === 400) {
-        return NextResponse.json({ error: "provider_bad_request" });
+        return NextResponse.json({ error: "provider_bad_request" }, { status: 400 });
       }
       if (res.status === 429 || res.status >= 500) {
-        return NextResponse.json({ error: "generation_busy" });
+        return NextResponse.json({ error: "generation_busy" }, { status: 503 });
       }
-      return NextResponse.json({ prompts: [] });
+      return NextResponse.json({ error: "generation_failed" }, { status: 502 });
     }
 
     const data = await res.json();
@@ -179,7 +182,7 @@ export async function POST(req: NextRequest) {
     const blocked = blockedPromptReasons.has(promptFeedbackBlockReason) ||
       (candidates.length > 0 && candidates.every((c: { finishReason?: string }) => blockedFinishReasons.has(String(c?.finishReason || "").toUpperCase())));
     if (blocked) {
-      return NextResponse.json({ error: "generation_blocked" });
+      return NextResponse.json({ error: "generation_blocked" }, { status: 400 });
     }
 
     for (const candidate of candidates) {
@@ -199,12 +202,12 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    return NextResponse.json({ prompts: [] });
+    return NextResponse.json({ error: "generation_failed" }, { status: 502 });
   } catch (e: unknown) {
     const msg = e instanceof Error ? e.message : "";
     if (msg.includes("401") || msg.includes("invalid") || msg.includes("auth")) {
-      return NextResponse.json({ error: "invalid key" });
+      return NextResponse.json({ error: "invalid key" }, { status: 401 });
     }
-    return NextResponse.json({ prompts: [] });
+    return NextResponse.json({ error: "generation_failed" }, { status: 500 });
   }
 }
