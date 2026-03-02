@@ -830,9 +830,11 @@ export default function App() {
           });
           if (res.status === 404) return setErr("Room not found");
           if (res.status === 409) {
-            const d = await res.json();
+            let d: { error?: string } = {};
+            try { d = await res.json(); } catch {}
             if (d.error === "not_in_lobby") return setErr("Game already in progress");
             if (d.error === "room_full") return setErr("Room is full");
+            return setErr("Cannot join this room");
           }
           if (res.status === 429) {
             const d = await res.json();
