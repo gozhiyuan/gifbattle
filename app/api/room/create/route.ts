@@ -18,8 +18,13 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  const body = await req.json();
-  const { pid, nickname } = body as { pid?: unknown; nickname?: unknown };
+  let body: { pid?: unknown; nickname?: unknown };
+  try {
+    body = await req.json();
+  } catch {
+    return NextResponse.json({ error: "invalid_body" }, { status: 400 });
+  }
+  const { pid, nickname } = body;
 
   if (typeof nickname !== "string" || !nickname.trim()) {
     return NextResponse.json({ error: "invalid_nickname" }, { status: 400 });
