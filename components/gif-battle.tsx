@@ -799,23 +799,25 @@ export default function App() {
       <HomeScreen nick={nick} setNick={setNick} joinIn={joinIn} setJoinIn={setJoinIn} err={err} setErr={setErr}
       onCreate={async () => {
         if (!nick.trim()) return setErr("Enter a nickname");
-        const c = genCode();
-        const s = {
-          phase:"lobby", host:pid, code:c,
-          players:[{id:pid,nickname:nick.trim(),score:0}],
-          prompts:[], submissions:{}, doneSubmitting:[], votingRound:0,
-          matchups:[], currentMatchup:0, roundMatchupWins:{},
-          submitDeadline:null, voteDeadline:null, usedPrompts:[], roundPlan:[], maxCompetitors:4,
-          submitSecs:SUBMIT_SECS, voteSecs:VOTE_SECS, rounds:DEFAULT_ROUNDS, namePromptRounds:DEFAULT_NAME_PROMPT_ROUNDS, customPrompts:[]
-        };
-        if (await writeGs(s, c)) {
+        try {
+          const res = await fetch("/api/room/create", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ pid, nickname: nick.trim() }),
+          });
+          if (res.status === 429) {
+            const d = await res.json();
+            return setErr(`Too many attempts — try again in ${d.retryAfterSec}s`);
+          }
+          if (!res.ok) return setErr("Failed to create room, please try again");
+          const { code: c } = await res.json();
           try {
             localStorage.setItem(NICK_STORAGE_KEY, nick.trim());
             localStorage.setItem(LAST_ROOM_STORAGE_KEY, c);
           } catch {}
           setCode(c);
           setView("game");
-        }
+        } catch { setErr("Failed to create room — check your connection"); }
       }}
       onJoin={async () => {
         if (!nick.trim()) return setErr("Enter a nickname");
