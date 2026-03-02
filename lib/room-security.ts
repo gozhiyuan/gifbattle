@@ -152,3 +152,18 @@ export const getRoomAiSubmissionUrls = (room: RoomState): string[] => {
     .map((s) => s.url as string)
     .filter(isManagedAiBlobUrl);
 };
+
+export async function checkIpRateLimit(
+  action: "create" | "join",
+  ip: string
+): Promise<{ allowed: boolean; retryAfterSec: number }> {
+  const limits: Record<string, number> = { create: 5, join: 30 };
+  const now = Date.now();
+  const window = Math.floor(now / MINUTE_MS);
+  const key = `gifbattle:rl:${action}:ip:${ip}:${window}`;
+  const count = await incrWithTtl(key, 2 * 60);
+  if (count > limits[action]) {
+    return { allowed: false, retryAfterSec: secondsUntilReset(now, MINUTE_MS) };
+  }
+  return { allowed: true, retryAfterSec: 0 };
+}
