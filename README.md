@@ -74,6 +74,12 @@ npm run test:e2e
    - `UPSTASH_REDIS_REST_URL`
    - `UPSTASH_REDIS_REST_TOKEN`
    - `NEXT_PUBLIC_GIPHY_KEY`
+   - `NEXT_PUBLIC_SITE_URL` (for example `https://gifbattles.com`)
+   - `BLOB_READ_WRITE_TOKEN` (required for AI image generation upload)
+   - `NEXT_PUBLIC_SENTRY_DSN` (required for Sentry error tracking)
+   - `NEXT_PUBLIC_SENTRY_TRACES_SAMPLE_RATE` (recommended `0.1`)
+   - Optional (source map upload): `SENTRY_ORG`, `SENTRY_PROJECT`, `SENTRY_AUTH_TOKEN`
+   - Optional (server-only DSN override): `SENTRY_DSN`
 4. Deploy — share the Vercel URL with your team
 
 Alternatively, use the [Upstash integration on Vercel Marketplace](https://vercel.com/marketplace?category=storage&search=upstash) to link a Redis database automatically.
@@ -108,6 +114,13 @@ tests/
 | `UPSTASH_REDIS_REST_URL` | Upstash Redis REST endpoint |
 | `UPSTASH_REDIS_REST_TOKEN` | Upstash Redis auth token |
 | `NEXT_PUBLIC_GIPHY_KEY` | Required app-level Giphy key for GIF search (users cannot override in UI) |
+| `NEXT_PUBLIC_SITE_URL` | Public base URL for canonical metadata, `robots.txt`, and `sitemap.xml` (for example `https://gifbattles.com`) |
+| `NEXT_PUBLIC_SENTRY_DSN` | Enables Sentry error tracking for client/server/edge runtimes |
+| `SENTRY_DSN` | Optional server-only Sentry DSN override (used by server/edge if set) |
+| `NEXT_PUBLIC_SENTRY_TRACES_SAMPLE_RATE` | Optional tracing sample rate in `[0,1]` (default `0.1`) |
+| `SENTRY_ORG` | Optional Sentry org slug for source map upload during build |
+| `SENTRY_PROJECT` | Optional Sentry project slug for source map upload during build |
+| `SENTRY_AUTH_TOKEN` | Optional auth token for source map upload during build |
 | `BLOB_READ_WRITE_TOKEN` | Required for AI image upload to Vercel Blob (`/api/generate-image`) |
 
 ### LLM key behavior

@@ -10,6 +10,7 @@
     "test:e2e": "npm run build && playwright test tests/e2e"
   },
   "dependencies": {
+    "@sentry/nextjs": "^10.41.0",
     "@upstash/redis": "^1.36.2",
     "@vercel/blob": "^2.3.0",
     "next": "^14",
