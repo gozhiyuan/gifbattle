@@ -444,7 +444,6 @@ const getStablePid = () => {
 };
 const TAB_ID = getStablePid();
 
-const genCode = () => Math.random().toString(36).slice(2, 8).toUpperCase();
 const rKey = c => `gifbattle:room:${c}`;
 const vKey = (c, round, mi, pid) => `gifbattle:vote:${c}:${round}:${mi}:${pid}`;
 const hbKey = c => `gifbattle:hb:${c}`;
