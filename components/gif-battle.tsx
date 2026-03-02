@@ -8,6 +8,7 @@ const DEFAULT_NAME_PROMPT_ROUNDS = 1;
 const VOTE_SECS = 12;        // seconds per voting matchup
 const SUBMIT_SECS = 60;      // seconds per GIF question (total = SUBMIT_SECS * rounds)
 const RESULTS_SECS = 5;      // seconds to show round results before auto-advancing
+const HOST_STALE_MS = 40000; // allow more background-tab delay before host takeover
 
 const PROMPTS = [
   "When you realize it's Monday tomorrow",
@@ -317,13 +318,20 @@ const buildNamePrompt = (names: string[]) => {
   return templates[Math.floor(Math.random() * templates.length)];
 };
 
-const buildPromptsForPlan = (pool: string[], plan, rounds: number, namePromptRounds: number, playerNameById: Map<string, string>) => {
+const buildPromptsForPlan = (
+  pool: string[],
+  plan,
+  rounds: number,
+  namePromptRounds: number,
+  playerNameById: Map<string, string>,
+  customPromptPool: string[] = []
+) => {
   const nameCycles = pickCycles(rounds, namePromptRounds);
   const nameSlots = plan.filter(p => nameCycles.has(p.cycle)).length;
   const standardPrompts = pickPrompts(pool, Math.max(0, plan.length - nameSlots));
   let standardIdx = 0;
 
-  return plan.map((entry) => {
+  const pickedPrompts = plan.map((entry) => {
     if (!nameCycles.has(entry.cycle)) {
       const picked = standardPrompts[standardIdx];
       standardIdx += 1;
@@ -334,14 +342,30 @@ const buildPromptsForPlan = (pool: string[], plan, rounds: number, namePromptRou
       .filter(Boolean);
     return buildNamePrompt(names);
   });
+
+  if (customPromptPool.length === 0) return pickedPrompts;
+  const customSet = new Set(customPromptPool);
+  if (pickedPrompts.some((p) => customSet.has(p))) return pickedPrompts;
+
+  const standardIndex = plan.findIndex((entry) => !nameCycles.has(entry.cycle));
+  const fallbackIndex = standardIndex >= 0 ? standardIndex : 0;
+  const forcedCustom = customPromptPool[Math.floor(Math.random() * customPromptPool.length)];
+  pickedPrompts[fallbackIndex] = forcedCustom;
+  return pickedPrompts;
 };
 
 const buildRoundPlan = (playerIds: string[], rounds: number, maxCompetitors: number) => {
   const plan: Array<{ participants: string[]; cycle: number; heat: number; heatsInCycle: number }> = [];
   const cap = Math.max(2, getEligibleCompetitors(playerIds.length, maxCompetitors));
+  const baseOrder = [...playerIds].sort(() => Math.random() - 0.5);
+  const rotate = <T,>(arr: T[], shift: number) => {
+    if (arr.length === 0) return arr;
+    const n = ((shift % arr.length) + arr.length) % arr.length;
+    return [...arr.slice(n), ...arr.slice(0, n)];
+  };
 
   for (let cycle = 0; cycle < rounds; cycle++) {
-    const shuffled = [...playerIds].sort(() => Math.random() - 0.5);
+    const shuffled = rotate(baseOrder, cycle);
     const groups: string[][] = [];
     for (let i = 0; i < shuffled.length; i += cap) groups.push(shuffled.slice(i, i + cap));
 
@@ -403,9 +427,24 @@ const buildMatchupsFromEligible = (eligible: string[]) => {
 };
 
 // Each browser tab gets a unique ID (module-level, not React state)
-const TAB_ID = Math.random().toString(36).slice(2, 10);
+const PID_STORAGE_KEY = "gifbattle_pid";
+const NICK_STORAGE_KEY = "gifbattle_nick";
+const LAST_ROOM_STORAGE_KEY = "gifbattle_last_room";
+const getStablePid = () => {
+  if (typeof window === "undefined") return Math.random().toString(36).slice(2, 10);
+  try {
+    const saved = localStorage.getItem(PID_STORAGE_KEY);
+    if (saved) return saved;
+    const next = Math.random().toString(36).slice(2, 10);
+    localStorage.setItem(PID_STORAGE_KEY, next);
+    return next;
+  } catch {
+    return Math.random().toString(36).slice(2, 10);
+  }
+};
+const TAB_ID = getStablePid();
 
-const genCode = () => Math.random().toString(36).slice(2, 6).toUpperCase();
+const genCode = () => Math.random().toString(36).slice(2, 8).toUpperCase();
 const rKey = c => `gifbattle:room:${c}`;
 const vKey = (c, round, mi, pid) => `gifbattle:vote:${c}:${round}:${mi}:${pid}`;
 const hbKey = c => `gifbattle:hb:${c}`;
@@ -426,9 +465,6 @@ const storage = {
   },
   del: async (key: string) => {
     await fetch(`/api/store?key=${encodeURIComponent(key)}`, { method: "DELETE" });
-  },
-  delPrefix: async (prefix: string) => {
-    await fetch(`/api/store?prefix=${encodeURIComponent(prefix)}`, { method: "DELETE" });
   },
 };
 
@@ -482,7 +518,7 @@ const makeStyles = (C: typeof DARK): Record<string, CSSProperties> => ({
   pageTop: { minHeight:"100vh", background:C.bg, color:C.text, fontFamily:FONT_BODY, display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"flex-start", padding:"20px 20px 40px" },
   card: { background:C.card, borderRadius:16, padding:"28px 32px", width:"100%", maxWidth:500, boxShadow:`0 0 0 1px ${C.muted}28, 0 28px 70px rgba(0,0,0,0.7)`, border:`1px solid ${C.muted}28` },
   wCard: { background:C.card, borderRadius:16, padding:"28px 32px", width:"100%", maxWidth:820, boxShadow:`0 0 0 1px ${C.muted}28, 0 28px 70px rgba(0,0,0,0.7)`, border:`1px solid ${C.muted}28` },
-  h1: { fontSize:52, fontWeight:900, margin:"0 0 4px", fontFamily:FONT_DISPLAY, letterSpacing:3, background:`linear-gradient(135deg, ${C.accent}, #ff8800 50%, ${C.accent})`, WebkitBackgroundClip:"text", WebkitTextFillColor:"transparent", lineHeight:1 },
+  h1: { fontSize:52, fontWeight:900, margin:"0 0 4px", fontFamily:FONT_DISPLAY, letterSpacing:3, display:"inline-block", background:`linear-gradient(135deg, ${C.accent}, #ff8800 50%, ${C.accent})`, backgroundClip:"text", WebkitBackgroundClip:"text", WebkitTextFillColor:"transparent", lineHeight:1 },
   h2: { fontSize:28, fontWeight:900, margin:"0 0 14px", fontFamily:FONT_DISPLAY, letterSpacing:2, color:C.text },
   sub: { color:C.muted, marginBottom:24, fontSize:14, letterSpacing:0.3 },
   inp: { width:"100%", padding:"13px 16px", borderRadius:10, border:`1px solid ${C.muted}55`, background:C.card2, color:C.text, fontSize:15, marginBottom:12, outline:"none", fontFamily:FONT_BODY },
@@ -539,15 +575,12 @@ function GifImg({ url, style={}, fit="cover", className="" }) {
 // ── App root ──────────────────────────────────────────────────────────────────
 export default function App() {
   const pid = TAB_ID;
-  const [themeMode, setThemeMode] = useState<ThemeMode>(() => {
-    if (typeof window === "undefined") return "auto";
-    return normalizeThemeMode(localStorage.getItem("gifbattle_theme"));
-  });
-  const [sysDark, setSysDark] = useState(() =>
-    typeof window !== "undefined" && window.matchMedia("(prefers-color-scheme: dark)").matches
-  );
+  const [themeMode, setThemeMode] = useState<ThemeMode>("auto");
+  const [sysDark, setSysDark] = useState(false);
   useEffect(() => {
+    setThemeMode(normalizeThemeMode(localStorage.getItem("gifbattle_theme")));
     const mq = window.matchMedia("(prefers-color-scheme: dark)");
+    setSysDark(mq.matches);
     const handler = (e: MediaQueryListEvent) => setSysDark(e.matches);
     mq.addEventListener("change", handler);
     return () => mq.removeEventListener("change", handler);
@@ -580,6 +613,33 @@ export default function App() {
   const isHostRef = useRef(false);
   const hbIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const hbMissingSinceRef = useRef<number | null>(null);
+  const endCleanupRef = useRef<Record<string, { base: boolean; images: boolean }>>({});
+
+  useEffect(() => {
+    try {
+      const savedNick = localStorage.getItem(NICK_STORAGE_KEY) || "";
+      if (savedNick) setNick(savedNick);
+      const savedRoom = (localStorage.getItem(LAST_ROOM_STORAGE_KEY) || "").trim().toUpperCase();
+      if (!savedRoom) return;
+      storage.get(rKey(savedRoom))
+        .then((r) => {
+          if (!r?.value) return;
+          const s = JSON.parse(r.value);
+          if (!s?.players?.some((p: { id: string }) => p.id === pid)) return;
+          setCode(savedRoom);
+          setGs(s);
+          lastGsJson.current = r.value;
+          setView("game");
+        })
+        .catch(() => {});
+    } catch {}
+  }, [pid]);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(NICK_STORAGE_KEY, nick || "");
+    } catch {}
+  }, [nick]);
 
   const fetchGs = useCallback(async (c?: string) => {
     try {
@@ -599,12 +659,56 @@ export default function App() {
 
   const writeGs = useCallback(async (state, c?: string) => {
     try {
-      const json = JSON.stringify(state);
+      const sanitizedState = { ...state };
+      if ("geminiKey" in sanitizedState) delete sanitizedState.geminiKey;
+      const json = JSON.stringify(sanitizedState);
       await storage.set(rKey(c || code), json);
       lastGsJson.current = json;
-      setGs(state); return state;
+      setGs(sanitizedState); return sanitizedState;
     } catch { return null; }
   }, [code]);
+
+  const runEndGameCleanup = useCallback(async (state, opts?: { deleteImages?: boolean }) => {
+    const roomCode = String(state?.code || code || "").trim().toUpperCase();
+    const deleteImages = Boolean(opts?.deleteImages);
+    if (!roomCode || state?.host !== pid) return;
+    const cleanupState = endCleanupRef.current[roomCode] || { base: false, images: false };
+    if (cleanupState.base && (!deleteImages || cleanupState.images)) return;
+
+    const tasks: Array<Promise<unknown>> = [];
+    if (!cleanupState.base) {
+      try { localStorage.removeItem("gifbattle_gemini_key"); } catch {}
+      tasks.push(
+        fetch("/api/gemini-key", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ code: roomCode, pid, key: "" }),
+        }),
+        storage.del(hbKey(roomCode))
+      );
+      cleanupState.base = true;
+    }
+
+    if (deleteImages && !cleanupState.images) {
+      const blobUrls = Object.values(state?.submissions || {})
+        .flat()
+        .filter((s: Submission) => s?.type === "ai" && s?.url)
+        .map((s: Submission) => s.url as string);
+      if (blobUrls.length > 0) {
+        tasks.push(
+          fetch("/api/cleanup-images", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ code: roomCode, pid, urls: blobUrls }),
+          })
+        );
+      }
+      cleanupState.images = true;
+    }
+
+    endCleanupRef.current[roomCode] = cleanupState;
+    await Promise.allSettled(tasks);
+  }, [code, pid]);
 
   const checkHostMigration = useCallback(async () => {
     const cur = gsRef.current;
@@ -618,16 +722,16 @@ export default function App() {
       if (r?.value) {
         hbMissingSinceRef.current = null;
         const hb: { ts?: number } = JSON.parse(r.value);
-        hostAlive = typeof hb.ts === "number" && now - hb.ts < 20000;
+        hostAlive = typeof hb.ts === "number" && now - hb.ts < HOST_STALE_MS;
       } else {
         hbMissingSinceRef.current = hbMissingSinceRef.current ?? now;
-        hostAlive = now - hbMissingSinceRef.current < 20000;
+        hostAlive = now - hbMissingSinceRef.current < HOST_STALE_MS;
       }
       if (hostAlive) return;
 
-      // Elect first non-host player as new host
-      const candidates = cur.players.filter((p: { id: string }) => p.id !== cur.host);
-      if (!candidates.length || candidates[0].id !== pid) return; // not my turn
+      // Any connected non-host participant may take over after heartbeat expiry.
+      const isCandidate = cur.players.some((p: { id: string }) => p.id !== cur.host && p.id === pid);
+      if (!isCandidate) return;
       // Confirm host hasn't already been migrated (re-fetch to avoid races)
       const fresh = await fetchGs() || cur;
       if (fresh.host !== cur.host) return;
@@ -685,6 +789,7 @@ export default function App() {
     clearInterval(pollRef.current);
     clearInterval(hbIntervalRef.current!);
     hbMissingSinceRef.current = null;
+    try { localStorage.removeItem(LAST_ROOM_STORAGE_KEY); } catch {}
     setView("home"); setGs(null); setCode(""); setErr("");
   };
 
@@ -703,7 +808,14 @@ export default function App() {
           submitDeadline:null, voteDeadline:null, usedPrompts:[], roundPlan:[], maxCompetitors:4,
           submitSecs:SUBMIT_SECS, voteSecs:VOTE_SECS, rounds:DEFAULT_ROUNDS, namePromptRounds:DEFAULT_NAME_PROMPT_ROUNDS, customPrompts:[]
         };
-        if (await writeGs(s, c)) { setCode(c); setView("game"); }
+        if (await writeGs(s, c)) {
+          try {
+            localStorage.setItem(NICK_STORAGE_KEY, nick.trim());
+            localStorage.setItem(LAST_ROOM_STORAGE_KEY, c);
+          } catch {}
+          setCode(c);
+          setView("game");
+        }
       }}
       onJoin={async () => {
         if (!nick.trim()) return setErr("Enter a nickname");
@@ -719,6 +831,10 @@ export default function App() {
             s.players.push({ id:pid, nickname:nick.trim(), score:0 });
             await storage.set(rKey(c), JSON.stringify(s));
           }
+          try {
+            localStorage.setItem(NICK_STORAGE_KEY, nick.trim());
+            localStorage.setItem(LAST_ROOM_STORAGE_KEY, c);
+          } catch {}
           setCode(c); setGs(s); setView("game");
         } catch { setErr("Failed to join — check the code"); }
       }}
@@ -740,14 +856,15 @@ export default function App() {
     const fresh = await fetchGs() || gs;
     const rounds = getRounds(fresh);
     const namePromptRounds = getNamePromptRounds(fresh);
-    const pool = [...PROMPTS, ...(fresh.customPrompts || [])];
+    const customPromptPool = (fresh.customPrompts || []) as string[];
+    const pool = [...PROMPTS, ...customPromptPool];
     if (pool.length === 0) return alert("No prompts available");
     const maxC = fresh.maxCompetitors ?? 4;
     const players = (fresh.players || []) as Array<{ id: string; nickname: string }>;
     const plan = buildRoundPlan(players.map(p => p.id), rounds, maxC);
     if (plan.length === 0) return alert("Not enough players to build matchups");
     const playerNameById = new Map(players.map(p => [p.id, p.nickname]));
-    const prompts = buildPromptsForPlan(pool, plan, rounds, namePromptRounds, playerNameById);
+    const prompts = buildPromptsForPlan(pool, plan, rounds, namePromptRounds, playerNameById, customPromptPool);
     await writeGs({
       ...fresh, phase:"submitting", prompts, submissions:{}, doneSubmitting:[], votingRound:0,
       matchups:[], currentMatchup:0, roundMatchupWins:{}, voteDeadline:null, usedPrompts:[], roundPlan:plan,
@@ -758,6 +875,7 @@ export default function App() {
   const transitionToVoting = async (state) => {
     const vRound = findNextVotableRound(state, state.votingRound ?? 0);
     if (vRound == null) {
+      await runEndGameCleanup(state, { deleteImages: false });
       await writeGs({ ...state, phase:"game_over" });
       return;
     }
@@ -801,7 +919,10 @@ export default function App() {
   const nextVotingRound = async () => {
     const fresh = await fetchGs() || gs;
     const nextVR = findNextVotableRound(fresh, (fresh.votingRound ?? 0) + 1);
-    if (nextVR == null) return writeGs({ ...fresh, phase:"game_over" });
+    if (nextVR == null) {
+      await runEndGameCleanup(fresh, { deleteImages: false });
+      return writeGs({ ...fresh, phase:"game_over" });
+    }
     const eligible = getEligibleForRound(fresh, nextVR);
 
     if (fresh.players.length <= 2) {
@@ -816,7 +937,7 @@ export default function App() {
     await writeGs({ ...fresh, votingRound:nextVR, phase:"voting", matchups, currentMatchup:0, roundMatchupWins:{}, voteDeadline:Date.now()+(fresh.voteSecs??VOTE_SECS)*1000 });
   };
 
-  const sp = { gs, pid, code, isHost, apiKey: envKey, geminiKey: gs?.geminiKey || "", writeGs, fetchGs, transitioning, transitionToVoting, advanceMatchup, startGame, nextVotingRound, leave };
+  const sp = { gs, pid, code, isHost, apiKey: envKey, writeGs, fetchGs, transitioning, transitionToVoting, advanceMatchup, startGame, nextVotingRound, runEndGameCleanup, leave };
   return (
     <ThemeCtx.Provider value={themeCtxVal}>
       <ThemeToggle />
@@ -871,9 +992,8 @@ function HomeScreen({ nick, setNick, joinIn, setJoinIn, err, setErr, onCreate, o
     <div style={g.page}>
       <div style={{...g.card,position:"relative"}}>
         <div style={{textAlign:"center", marginBottom:28}}>
-          <div style={{fontSize:72, fontWeight:900, fontFamily:"'Bebas Neue', sans-serif", letterSpacing:5,
-            background:`linear-gradient(135deg, ${C.accent} 0%, #ff8800 50%, ${C.cyan} 100%)`,
-            WebkitBackgroundClip:"text", WebkitTextFillColor:"transparent", lineHeight:1, marginBottom:6}}>
+          <div style={{fontSize:72, fontWeight:900, fontFamily:"'Bebas Neue', sans-serif", letterSpacing:5, display:"inline-block",
+            color:C.text, lineHeight:1, marginBottom:6, textShadow:`0 2px 0 ${C.bg}, 0 0 28px ${C.accent}55`}}>
             GIF BATTLE
           </div>
           <div style={{color:C.muted, fontSize:11, letterSpacing:5, fontWeight:600}}>PICK · VOTE · GLORY</div>
@@ -883,7 +1003,7 @@ function HomeScreen({ nick, setNick, joinIn, setJoinIn, err, setErr, onCreate, o
           onChange={e=>{setNick(e.target.value);setErr("");}} onKeyDown={e=>e.key==="Enter"&&onCreate()} />
         <button className="gbtn" style={{...g.btn,...g.btnP}} onClick={onCreate}>🎲 Create Room</button>
         <div style={g.divider}>— or join with a code —</div>
-        <input style={g.inp} placeholder="Room code (e.g. AB12)" value={joinIn} maxLength={6}
+        <input style={g.inp} placeholder="Room code (e.g. AB12CD)" value={joinIn} maxLength={6}
           onChange={e=>{setJoinIn(e.target.value.toUpperCase());setErr("");}} onKeyDown={e=>e.key==="Enter"&&onJoin()} />
         <button className="gbtn" style={{...g.btn,...g.btnS,marginBottom:0}} onClick={onJoin}>🚪 Join Room</button>
       </div>
@@ -897,41 +1017,73 @@ function Lobby({ gs, pid, code, isHost, startGame, leave, writeGs }) {
   const [copied, setCopied] = useState(false);
   const [promptInput, setPromptInput] = useState("");
   const [generating, setGenerating] = useState(false);
-  const [suggestions, setSuggestions] = useState<string[]>([]);
   const [genError, setGenError] = useState("");
+  const [llmCreateStatus, setLlmCreateStatus] = useState<{ ok: boolean; message: string } | null>(null);
+  const [promptGenSlow, setPromptGenSlow] = useState(false);
+  const promptSlowRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => () => { clearTimeout(promptSlowRef.current!); }, []);
 
-  // Gemini key — stored in localStorage AND room state so all players can use it
+  // Gemini key is stored only in host localStorage + server-side secret storage.
   const [geminiKey, setGeminiKey] = useState("");
   const [keyInput, setKeyInput] = useState("");
+  const [roomKeySet, setRoomKeySet] = useState(false);
   const [editingKey, setEditingKey] = useState(false);
   useEffect(() => {
-    const saved = localStorage.getItem("gifbattle_gemini_key") || gs.geminiKey || "";
+    const saved = localStorage.getItem("gifbattle_gemini_key") || "";
     setGeminiKey(saved);
     setKeyInput(saved);
-  }, []);
+    if (!isHost) return;
+    fetch(`/api/gemini-key?code=${encodeURIComponent(code)}&pid=${encodeURIComponent(pid)}`)
+      .then(r => r.ok ? r.json() : null)
+      .then(data => setRoomKeySet(Boolean(data?.exists)))
+      .catch(() => {});
+  }, [code, isHost, pid]);
   const saveKey = async () => {
     const k = keyInput.trim();
     localStorage.setItem("gifbattle_gemini_key", k);
     setGeminiKey(k);
     setEditingKey(false);
     setGenError("");
-    if (isHost) await writeGs({ ...gs, geminiKey: k });
+    if (!isHost) return;
+    try {
+      const res = await fetch("/api/gemini-key", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ code, pid, key: k }),
+      });
+      const data = await res.json();
+      if (!res.ok || data?.error) {
+        setGenError("Failed to save Gemini key on server");
+        return;
+      }
+      setRoomKeySet(Boolean(data?.exists));
+    } catch {
+      setGenError("Failed to save Gemini key on server");
+    }
   };
   const clearKey = async () => {
     localStorage.removeItem("gifbattle_gemini_key");
     setGeminiKey("");
     setKeyInput("");
     setEditingKey(false);
-    if (isHost) await writeGs({ ...gs, geminiKey: "" });
+    if (!isHost) return;
+    try {
+      await fetch("/api/gemini-key", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ code, pid, key: "" }),
+      });
+    } catch {}
+    setRoomKeySet(false);
   };
   const maskKey = (k: string) => k.length > 8 ? k.slice(0, 7) + "…" + k.slice(-4) : "••••••••";
 
   const GEMINI_MODELS = [
-    { id: "gemini-2.0-flash-exp", label: "2.0 Flash" },
-    { id: "gemini-1.5-flash", label: "1.5 Flash" },
-    { id: "gemini-1.5-pro", label: "1.5 Pro" },
+    { id: "gemini-2.5-flash", label: "2.5 Flash" },
+    { id: "gemini-2.5-pro", label: "2.5 Pro" },
   ];
-  const currentModel = gs.geminiModel || "gemini-2.0-flash-exp";
+  const modelIds = new Set(GEMINI_MODELS.map(m => m.id));
+  const currentModel = modelIds.has(gs.geminiModel) ? gs.geminiModel : GEMINI_MODELS[0].id;
   const setGeminiModel = async (m: string) => {
     if (!isHost) return;
     await writeGs({ ...gs, geminiModel: m });
@@ -990,27 +1142,78 @@ function Lobby({ gs, pid, code, isHost, startGame, leave, writeGs }) {
 
   const generatePrompts = async () => {
     setGenerating(true);
+    setPromptGenSlow(false);
     setGenError("");
-    setSuggestions([]);
+    setLlmCreateStatus(null);
+    clearTimeout(promptSlowRef.current!);
+    promptSlowRef.current = setTimeout(() => setPromptGenSlow(true), 6000);
     try {
+      const promptSeeds = [
+        ...customPrompts,
+        promptInput.trim(),
+      ].filter(Boolean);
+
       const res = await fetch("/api/generate-prompts", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ playerNames: gs.players.map(p => p.nickname), apiKey: geminiKey || undefined, model: currentModel }),
+        body: JSON.stringify({ existingPrompts: promptSeeds, roomCode: code, pid, model: currentModel }),
       });
       const data = await res.json();
       if (data.error === "not configured") {
         setGenError("No API key set — enter your Gemini key below");
+        setLlmCreateStatus({ ok: false, message: "LLM could not create custom questions." });
         setEditingKey(true);
       } else if (data.error === "invalid key") {
         setGenError("Invalid API key — check and re-enter it below");
+        setLlmCreateStatus({ ok: false, message: "LLM could not create custom questions." });
         setEditingKey(true);
+      } else if (data.error === "provider_bad_request") {
+        setGenError("Gemini request was rejected (model/config). Try a different model or update server config.");
+        setLlmCreateStatus({ ok: false, message: "LLM could not create custom questions." });
+      } else if (data.error === "rate_limited") {
+        const wait = Number(data.retryAfter);
+        setGenError(`Too many prompt generations in this room. Try again in ${Number.isFinite(wait) ? Math.max(1, Math.ceil(wait)) : 30}s.`);
+        setLlmCreateStatus({ ok: false, message: "LLM could not create custom questions." });
+      } else if (data.error === "generation_busy") {
+        setGenError("Gemini is currently busy. Please retry in a few seconds.");
+        setLlmCreateStatus({ ok: false, message: "LLM could not create custom questions." });
+      } else if (data.error === "forbidden") {
+        setGenError("Room authorization failed — try rejoining");
+        setLlmCreateStatus({ ok: false, message: "LLM could not create custom questions." });
+      } else if (data.error === "generation_blocked") {
+        setGenError("Gemini blocked this generation response. Try a simpler custom prompt seed.");
+        setLlmCreateStatus({ ok: false, message: "LLM generation was blocked by provider safety filters." });
       } else {
-        setSuggestions(data.prompts || []);
+        const generated: string[] = Array.isArray(data.prompts)
+          ? Array.from(new Set(
+              data.prompts
+                .filter((p: unknown): p is string => typeof p === "string")
+                .map(p => p.trim())
+                .filter(Boolean)
+            ))
+          : [];
+        if (generated.length === 0) {
+          setLlmCreateStatus({ ok: false, message: "LLM response format was invalid. Please retry." });
+          return;
+        }
+        const newPrompts = generated.filter(p => !customPrompts.includes(p));
+        if (newPrompts.length === 0) {
+          setLlmCreateStatus({ ok: false, message: "LLM completed, but no new unique questions were added." });
+          return;
+        }
+        await writeGs({ ...gs, customPrompts: [...customPrompts, ...newPrompts] });
+        setLlmCreateStatus({
+          ok: true,
+          message: `LLM created and added ${newPrompts.length} custom question${newPrompts.length > 1 ? "s" : ""}.`,
+        });
       }
     } catch {
       setGenError("Failed to generate — check your connection");
+      setLlmCreateStatus({ ok: false, message: "LLM could not create custom questions." });
     } finally {
+      clearTimeout(promptSlowRef.current!);
+      promptSlowRef.current = null;
+      setPromptGenSlow(false);
       setGenerating(false);
     }
   };
@@ -1018,7 +1221,16 @@ function Lobby({ gs, pid, code, isHost, startGame, leave, writeGs }) {
   return (
     <div style={g.page}>
       <div style={g.card}>
-        <div style={{...g.h1,marginBottom:4}}>LOBBY</div>
+        <div style={{
+          ...g.h1,
+          marginBottom: 4,
+          background: "none",
+          color: C.text,
+          WebkitTextFillColor: C.text,
+          textShadow: `0 2px 0 ${C.bg}, 0 0 28px ${C.accent}55`,
+        }}>
+          LOBBY
+        </div>
         <div style={g.sub}>Share the code & wait for friends</div>
         <div style={{background:C.card2,borderRadius:12,padding:"14px 20px",marginBottom:20,display:"flex",justifyContent:"space-between",alignItems:"center",border:`1px solid ${C.cyan}33`}}>
           <div>
@@ -1113,14 +1325,14 @@ function Lobby({ gs, pid, code, isHost, startGame, leave, writeGs }) {
                 <div style={{fontSize:11,color:C.muted,letterSpacing:2,marginBottom:6}}>GEMINI API KEY</div>
                 {!editingKey ? (
                   <div style={{display:"flex",alignItems:"center",gap:8}}>
-                    <span style={{fontSize:13,flex:1,color:geminiKey?C.green:C.muted}}>
-                      {geminiKey ? "✓ " + maskKey(geminiKey) : "Not set"}
+                    <span style={{fontSize:13,flex:1,color:roomKeySet?C.green:C.muted}}>
+                      {roomKeySet ? `✓ ${geminiKey ? maskKey(geminiKey) : "Key set on server"}` : "Not set"}
                     </span>
                     <button onClick={()=>{setKeyInput(geminiKey);setEditingKey(true);}}
                       style={{...g.btnSm,background:C.card2,color:C.text,border:`1px solid ${C.muted}44`}}>
-                      {geminiKey ? "Change" : "Set Key"}
+                      {roomKeySet ? "Change" : "Set Key"}
                     </button>
-                    {geminiKey && (
+                    {roomKeySet && (
                       <button onClick={clearKey}
                         style={{...g.btnSm,background:`${C.accent}18`,color:C.accent,border:"none"}}>
                         Clear
@@ -1165,11 +1377,6 @@ function Lobby({ gs, pid, code, isHost, startGame, leave, writeGs }) {
                       </button>
                     ))}
                   </div>
-                  {currentModel !== "gemini-2.0-flash-exp" && (
-                    <div style={{fontSize:11,color:C.yellow,marginTop:4}}>
-                      ⚠ Image generation requires 2.0 Flash
-                    </div>
-                  )}
                 </div>
               </div>
 
@@ -1178,35 +1385,22 @@ function Lobby({ gs, pid, code, isHost, startGame, leave, writeGs }) {
                 onClick={generatePrompts}
                 disabled={generating}
               >
-                {generating ? "✨ Generating…" : "✨ Generate ideas from player names"}
+                {generating ? "✨ Generating…" : "✨ Enrich custom questions with LLM"}
               </button>
+              {generating && promptGenSlow && (
+                <div style={g.info}>Still working… this can take a little longer when Gemini is under load.</div>
+              )}
 
               {genError && <div style={g.err}>⚠ {genError}</div>}
-
-              {suggestions.length > 0 && (
-                <div style={{marginBottom:10}}>
-                  <div style={{fontSize:11,color:C.muted,letterSpacing:2,marginBottom:8}}>AI SUGGESTIONS — click + to add:</div>
-                  {suggestions.map((s, i) => {
-                    const already = customPrompts.includes(s);
-                    return (
-                      <div key={i} style={{display:"flex",alignItems:"center",gap:8,marginBottom:6}}>
-                        <button
-                          onClick={() => !already && addPrompt(s)}
-                          disabled={already}
-                          style={{
-                            ...g.btnSm,
-                            background:already?C.card2:`linear-gradient(135deg, ${C.accent}, ${C.cyan})`,
-                            color:already?C.muted:"#fff",
-                            border:already?`1px solid ${C.muted}44`:"none",
-                            minWidth:32,
-                          }}
-                        >
-                          {already ? "✓" : "+"}
-                        </button>
-                        <span style={{fontSize:13,color:already?C.muted:C.text}}>{s}</span>
-                      </div>
-                    );
-                  })}
+              {llmCreateStatus && (
+                <div style={{
+                  ...g.info,
+                  marginBottom:10,
+                  background: llmCreateStatus.ok ? `${C.green}14` : `${C.yellow}15`,
+                  color: llmCreateStatus.ok ? C.green : C.yellow,
+                  border: `1px solid ${llmCreateStatus.ok ? `${C.green}44` : `${C.yellow}55`}`,
+                }}>
+                  {llmCreateStatus.ok ? "✓" : "⚠"} {llmCreateStatus.message}
                 </div>
               )}
             </>
@@ -1260,7 +1454,7 @@ function Lobby({ gs, pid, code, isHost, startGame, leave, writeGs }) {
 }
 
 // ── Submit ────────────────────────────────────────────────────────────────────
-function Submit({ gs, pid, apiKey, writeGs, fetchGs, transitioning, transitionToVoting, isHost }) {
+function Submit({ gs, pid, code, apiKey, writeGs, fetchGs, transitioning, transitionToVoting, isHost }) {
   const { C, g } = useContext(ThemeCtx);
   const rounds = getRounds(gs);
   const subs = (gs.submissions || {}) as Record<string, Array<Submission>>;
@@ -1281,11 +1475,14 @@ function Submit({ gs, pid, apiKey, writeGs, fetchGs, transitioning, transitionTo
   const [searching, setSearching] = useState(false);
   const [searchErr, setSearchErr] = useState("");
   const searchQ = useRef<ReturnType<typeof setTimeout>|null>(null);
-  const [activeTab, setActiveTab] = useState<"giphy"|"write">("giphy");
+  const [activeTab, setActiveTab] = useState<"giphy"|"write">(apiKey ? "giphy" : "write");
   const [textStyle, setTextStyle] = useState("random");
   const [generating, setGenerating] = useState(false);
   const [genError, setGenError] = useState("");
   const [genImageUrl, setGenImageUrl] = useState<string|null>(null);
+  const [genSlow, setGenSlow] = useState(false);
+  const genSlowRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => () => { clearTimeout(genSlowRef.current!); }, []);
   const scrollRef = useRef<HTMLDivElement>(null);
   const sentinelRef = useRef<HTMLDivElement>(null);
   const timerRef = useRef<ReturnType<typeof setInterval>|null>(null);
@@ -1321,7 +1518,13 @@ function Submit({ gs, pid, apiKey, writeGs, fetchGs, transitioning, transitionTo
     setGenError("");
     setGenImageUrl(null);
     setGenerating(false);
+    setGenSlow(false);
+    clearTimeout(genSlowRef.current!);
+    genSlowRef.current = null;
   }, [currentRoundIndex]);
+  useEffect(() => {
+    if (!apiKey && activeTab !== "write") setActiveTab("write");
+  }, [apiKey, activeTab]);
 
   const doSearch = async (q: string) => {
     setGifs([]);
@@ -1382,24 +1585,42 @@ function Submit({ gs, pid, apiKey, writeGs, fetchGs, transitioning, transitionTo
 
   const generateImage = async () => {
     if (!query.trim()) return;
-    const key = gs.geminiKey || "";
-    if (!key) { setGenError("No Gemini key set — ask the host to add one in the lobby"); return; }
     setGenerating(true);
+    setGenSlow(false);
     setGenError("");
     setGenImageUrl(null);
+    clearTimeout(genSlowRef.current!);
+    genSlowRef.current = setTimeout(() => setGenSlow(true), 8000);
     try {
       const res = await fetch("/api/generate-image", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ textAnswer: query, gamePrompt: currentPrompt, style: textStyle, apiKey: key }),
+        body: JSON.stringify({ roomCode: code, pid, textAnswer: query, gamePrompt: currentPrompt, style: textStyle }),
       });
       const data = await res.json();
+      if (data.error === "not_configured") { setGenError("No Gemini key set — ask the host to add one in the lobby"); return; }
       if (data.error === "invalid_key") { setGenError("Invalid Gemini key — ask the host to update it in the lobby"); return; }
+      if (data.error === "forbidden") { setGenError("Room authorization failed — rejoin the room"); return; }
+      if (data.error === "provider_bad_request") { setGenError("Gemini rejected the request (model/config). Please try again later."); return; }
+      if (data.error === "generation_blocked") { setGenError("Gemini blocked this image request. Try different wording."); return; }
+      if (data.error === "provider_no_image") { setGenError("Gemini returned no image for this request. Please retry."); return; }
+      if (data.error === "generation_timeout") { setGenError("Image generation timed out. Please retry."); return; }
+      if (data.error === "storage_not_configured") { setGenError("Image storage is not configured on server (missing BLOB_READ_WRITE_TOKEN)."); return; }
+      if (data.error === "storage_failed") { setGenError("Image generated but failed to save. Please retry."); return; }
+      if (data.error === "rate_limited") {
+        const wait = Number(data.retryAfter);
+        setGenError(`Too many image generations in this room. Try again in ${Number.isFinite(wait) ? Math.max(1, Math.ceil(wait)) : 30}s.`);
+        return;
+      }
+      if (data.error === "generation_busy") { setGenError("Gemini is currently busy. Please retry in a few seconds."); return; }
       if (data.error || !data.url) { setGenError("Generation failed — try again"); return; }
       setGenImageUrl(data.url);
     } catch {
       setGenError("Generation failed — check your connection");
     } finally {
+      clearTimeout(genSlowRef.current!);
+      genSlowRef.current = null;
+      setGenSlow(false);
       setGenerating(false);
     }
   };
@@ -1611,6 +1832,9 @@ function Submit({ gs, pid, apiKey, writeGs, fetchGs, transitioning, transitionTo
               </div>
             )}
             {genError && <div style={g.err}>⚠ {genError}</div>}
+            {generating && genSlow && (
+              <div style={g.info}>Still generating… this can take up to about 45 seconds.</div>
+            )}
             <div style={{display:"flex",gap:8,marginBottom:0}}>
               <button className="gbtn"
                 style={{...g.btn,...g.btnS,flex:1,marginBottom:0,opacity:generating||!query.trim()?0.6:1}}
@@ -1871,26 +2095,24 @@ function RoundResults({ gs, isHost, nextVotingRound, transitioning }) {
 }
 
 // ── Game Over ─────────────────────────────────────────────────────────────────
-function GameOver({ gs, writeGs, pid }) {
+function GameOver({ gs, writeGs, pid, runEndGameCleanup }) {
   const { C, g } = useContext(ThemeCtx);
   const rounds = getRounds(gs);
   const sorted=[...gs.players].sort((a,b)=>b.score-a.score);
   const medals=["🥇","🥈","🥉"];
   const prompts = (gs.prompts || []) as string[];
   const subs = (gs.submissions || {}) as Record<string, Array<Submission>>;
+  const [downloading, setDownloading] = useState(false);
+  const [downloadErr, setDownloadErr] = useState("");
   useEffect(() => {
-    const blobUrls = Object.values(gs.submissions || {})
-      .flat()
-      .filter((s: Submission) => s?.type === "ai" && s?.url)
-      .map((s: Submission) => s.url as string);
-    if (blobUrls.length > 0) {
-      fetch("/api/cleanup-images", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ urls: blobUrls }),
-      }).catch(() => {});
-    }
-  }, []);
+    if (pid !== gs.host) return;
+    try { localStorage.removeItem("gifbattle_gemini_key"); } catch {}
+    fetch("/api/gemini-key", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ code: gs.code, pid, key: "" }),
+    }).catch(() => {});
+  }, [gs.code, gs.host, pid]);
   const plan = getRoundPlan(gs);
   const playerNameById = new Map<string, string>(
     ((gs.players || []) as Array<{ id: string; nickname: string }>).map((p) => [p.id, p.nickname])
@@ -1910,10 +2132,131 @@ function GameOver({ gs, writeGs, pid }) {
     participants: (gs.players || []).map(p => p.id),
     prompt,
   })));
+  const summaryMediaHeight = 180;
+
+  const escapeHtml = (value: string) =>
+    value
+      .replaceAll("&", "&amp;")
+      .replaceAll("<", "&lt;")
+      .replaceAll(">", "&gt;")
+      .replaceAll("\"", "&quot;")
+      .replaceAll("'", "&#39;");
+
+  const downloadResults = async () => {
+    if (downloading) return;
+    setDownloading(true);
+    setDownloadErr("");
+    try {
+      const now = new Date();
+      const generatedAt = now.toLocaleString();
+      const timestamp = now.toISOString().slice(0, 19).replace(/[:T]/g, "-");
+      const aiUrls = Array.from(new Set(
+        Object.values(subs || {})
+          .flat()
+          .filter((s: Submission) => s?.type === "ai" && typeof s?.url === "string")
+          .map((s: Submission) => s.url as string)
+      ));
+      const aiDataUrlMap = new Map<string, string>();
+      await Promise.all(aiUrls.map(async (url) => {
+        try {
+          const res = await fetch(url);
+          if (!res.ok) return;
+          const blob = await res.blob();
+          const dataUrl = await new Promise<string>((resolve, reject) => {
+            const reader = new FileReader();
+            reader.onload = () => resolve(typeof reader.result === "string" ? reader.result : "");
+            reader.onerror = () => reject(new Error("read_failed"));
+            reader.readAsDataURL(blob);
+          });
+          if (dataUrl) aiDataUrlMap.set(url, dataUrl);
+        } catch {}
+      }));
+      const scoreRowsHtml = sorted.map((p, i) => (
+        `<tr><td>${i + 1}</td><td>${escapeHtml(p.nickname)}</td><td>${p.score}</td></tr>`
+      )).join("");
+      const summaryHtml = summaryRows.map((row) => {
+        const cardsHtml = row.participants.map((playerId) => {
+          const sub = subs[playerId]?.[row.idx];
+          const nick = playerNameById.get(playerId) || "Player";
+          if (sub?.type === "text") {
+            return `<div class="card"><div class="name">${escapeHtml(nick)}</div><div class="text-answer">"${escapeHtml(sub.textAnswer || "")}"</div></div>`;
+          }
+          if (sub?.url) {
+            const imageSrc = sub?.type === "ai" ? (aiDataUrlMap.get(sub.url) || sub.url) : sub.url;
+            const badge = sub?.type === "ai" ? `<span class="badge">AI</span>` : `<span class="badge">GIF</span>`;
+            const caption = sub?.textAnswer ? `<div class="caption">"${escapeHtml(sub.textAnswer)}"</div>` : "";
+            return `<div class="card"><div class="name">${escapeHtml(nick)}</div><div class="image-wrap"><img src="${escapeHtml(imageSrc)}" alt="submission" loading="lazy"/>${badge}</div>${caption}</div>`;
+          }
+          return `<div class="card"><div class="name">${escapeHtml(nick)}</div><div class="missing">No submission</div></div>`;
+        }).join("");
+        return `<section class="round"><div class="meta">ROUND ${row.cycle + 1}/${rounds} · HEAT ${row.heat + 1}/${row.heatsInCycle}</div><h3>"${escapeHtml(row.prompt || "No prompt")}"</h3><div class="grid">${cardsHtml}</div></section>`;
+      }).join("");
+
+      const html = `<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>GIF Battle Results ${escapeHtml(gs.code || "")}</title>
+  <style>
+    :root { color-scheme: dark; }
+    body { margin: 0; padding: 28px; background: #0b0b17; color: #ececff; font-family: "DM Sans", system-ui, -apple-system, sans-serif; }
+    h1 { margin: 0 0 8px; font-size: 42px; letter-spacing: 1px; }
+    h2 { margin: 18px 0 8px; font-size: 20px; }
+    .sub { color: #9aa0d1; margin-bottom: 12px; }
+    .block { background: #15152c; border: 1px solid #3a3a6f44; border-radius: 14px; padding: 14px; margin-bottom: 16px; }
+    table { width: 100%; border-collapse: collapse; }
+    th, td { text-align: left; padding: 8px; border-bottom: 1px solid #3a3a6f44; }
+    .round { background: #101028; border: 1px solid #3a3a6f33; border-radius: 12px; padding: 12px; margin-bottom: 10px; }
+    .meta { font-size: 12px; color: #9aa0d1; letter-spacing: 1px; margin-bottom: 6px; }
+    .round h3 { margin: 0 0 10px; font-size: 17px; font-style: italic; }
+    .grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+    .card { background: #181834; border: 1px solid #3a3a6f33; border-radius: 10px; padding: 8px; }
+    .name { font-size: 11px; letter-spacing: 1px; color: #9aa0d1; font-weight: 700; margin-bottom: 6px; text-transform: uppercase; }
+    .image-wrap { position: relative; height: 220px; border-radius: 6px; background: #101028; display: flex; align-items: center; justify-content: center; overflow: hidden; }
+    img { max-width: 100%; max-height: 100%; width: auto; height: auto; object-fit: contain; display: block; background: #101028; }
+    .badge { position: absolute; top: 6px; right: 6px; background: rgba(0,0,0,0.75); color: #8fe8ff; border: 1px solid #8fe8ff55; border-radius: 4px; font-size: 10px; font-weight: 700; padding: 1px 5px; }
+    .text-answer { min-height: 220px; border-radius: 6px; display: flex; align-items: center; justify-content: center; text-align: center; padding: 12px; background: linear-gradient(135deg, #ff297922, #00e5ff1a); border: 1px solid #ff297944; }
+    .caption { font-size: 12px; color: #9aa0d1; margin-top: 6px; font-style: italic; text-align: center; }
+    .missing { height: 220px; border-radius: 6px; display: flex; align-items: center; justify-content: center; color: #9aa0d1; background: #101028; }
+    @media (max-width: 860px) { .grid { grid-template-columns: 1fr; } }
+  </style>
+</head>
+<body>
+  <h1>GIF BATTLE RESULTS</h1>
+  <div class="sub">Room ${escapeHtml(gs.code || "")} · Generated ${escapeHtml(generatedAt)}</div>
+  <div class="block">
+    <h2>Final Scoreboard</h2>
+    <table>
+      <thead><tr><th>#</th><th>Player</th><th>Score</th></tr></thead>
+      <tbody>${scoreRowsHtml}</tbody>
+    </table>
+  </div>
+  <div class="block">
+    <h2>Game Summary</h2>
+    ${summaryHtml}
+  </div>
+</body>
+</html>`;
+
+      const blob = new Blob([html], { type: "text/html;charset=utf-8" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `gifbattle-results-${(gs.code || "room").toLowerCase()}-${timestamp}.html`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+    } catch {
+      setDownloadErr("Failed to build results download.");
+    } finally {
+      setDownloading(false);
+    }
+  };
 
   const playAgain=async()=>{
-    // Best-effort: delete all vote keys for this game before resetting
-    storage.delPrefix(`gifbattle:vote:${gs.code}:`).catch(()=>{});
+    await runEndGameCleanup(gs, { deleteImages: true });
     await writeGs({
       ...gs, phase:"lobby",
       players:gs.players.map(p=>({...p,score:0})),
@@ -1975,7 +2318,7 @@ function GameOver({ gs, writeGs, pid }) {
                     <div key={`${row.idx}-${playerId}`} style={{background:C.card,borderRadius:8,padding:"8px",border:`1px solid ${C.muted}22`}}>
                       <div style={{fontSize:11,fontWeight:700,marginBottom:6,color:C.muted,letterSpacing:1}}>{nick.toUpperCase()}</div>
                       {sub?.type === "text"
-                        ? <div style={{height:130,background:`linear-gradient(135deg, ${C.accent}18, ${C.cyan}12)`,borderRadius:6,
+                        ? <div style={{height:summaryMediaHeight,background:`linear-gradient(135deg, ${C.accent}18, ${C.cyan}12)`,borderRadius:6,
                             display:"flex",alignItems:"center",justifyContent:"center",padding:10,
                             border:`1px solid ${C.accent}22`}}>
                             <div style={{fontSize:13,fontWeight:600,color:C.text,textAlign:"center",fontStyle:"italic",lineHeight:1.4}}>
@@ -1983,10 +2326,12 @@ function GameOver({ gs, writeGs, pid }) {
                             </div>
                           </div>
                         : sub?.type === "ai" && sub?.url
-                        ? <div style={{position:"relative"}}>
-                            <img src={sub.url} alt="AI" style={{height:130,width:"100%",objectFit:"cover",borderRadius:6,display:"block"}}/>
-                            <div style={{position:"absolute",top:4,right:4,background:`${C.bg}cc`,borderRadius:4,
-                              padding:"1px 5px",fontSize:9,color:C.cyan,fontWeight:700,letterSpacing:1}}>✨ AI</div>
+                        ? <div>
+                            <div style={{position:"relative",height:summaryMediaHeight,background:C.bg,borderRadius:6,display:"flex",alignItems:"center",justifyContent:"center",overflow:"hidden"}}>
+                              <img src={sub.url} alt="AI" style={{maxWidth:"100%",maxHeight:"100%",objectFit:"contain",borderRadius:6,display:"block"}}/>
+                              <div style={{position:"absolute",top:4,right:4,background:`${C.bg}cc`,borderRadius:4,
+                                padding:"1px 5px",fontSize:9,color:C.cyan,fontWeight:700,letterSpacing:1}}>✨ AI</div>
+                            </div>
                             {sub.textAnswer && (
                               <div style={{fontSize:10,color:C.muted,marginTop:4,fontStyle:"italic",textAlign:"center",
                                 overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>
@@ -1995,8 +2340,8 @@ function GameOver({ gs, writeGs, pid }) {
                             )}
                           </div>
                         : sub?.url
-                        ? <GifImg url={sub.url} style={{height:130,borderRadius:6}} fit="cover"/>
-                        : <div style={{height:130,background:C.card2,borderRadius:6,display:"flex",alignItems:"center",justifyContent:"center",color:C.muted,fontSize:12}}>No submission</div>}
+                        ? <GifImg url={sub.url} style={{height:summaryMediaHeight,borderRadius:6,background:C.bg}} fit="contain"/>
+                        : <div style={{height:summaryMediaHeight,background:C.card2,borderRadius:6,display:"flex",alignItems:"center",justifyContent:"center",color:C.muted,fontSize:12}}>No submission</div>}
                     </div>
                   );
                 })}
@@ -2005,6 +2350,10 @@ function GameOver({ gs, writeGs, pid }) {
           ))}
         </div>
         <PoweredByGiphy/>
+        {downloadErr && <div style={g.err}>⚠ {downloadErr}</div>}
+        <button className="gbtn" style={{...g.btn,...g.btnS,fontSize:16,letterSpacing:1}} onClick={downloadResults} disabled={downloading}>
+          {downloading ? "Preparing Download…" : "↓ Download Results (HTML)"}
+        </button>
 
         <button className="gbtn" style={{...g.btn,...g.btnP,marginBottom:0,fontSize:16,letterSpacing:1}} onClick={playAgain}>↺ Play Again</button>
       </div>

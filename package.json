@@ -4,7 +4,10 @@
   "scripts": {
     "dev": "next dev",
     "build": "next build",
-    "start": "next start"
+    "start": "next start",
+    "test": "npm run build && playwright test",
+    "test:smoke": "npm run build && playwright test tests/smoke.spec.ts",
+    "test:e2e": "npm run build && playwright test tests/e2e"
   },
   "dependencies": {
     "@upstash/redis": "^1.36.2",
@@ -14,6 +17,7 @@
     "react-dom": "^18"
   },
   "devDependencies": {
+    "@playwright/test": "^1.58.2",
     "@types/node": "^20",
     "@types/react": "^18",
     "typescript": "^5"
