@@ -823,21 +823,29 @@ export default function App() {
         const c = joinIn.trim().toUpperCase();
         if (c.length < 4) return setErr("Enter a valid room code");
         try {
-          const r = await storage.get(rKey(c));
-          if (!r) return setErr("Room not found");
-          const s = JSON.parse(r.value);
-          if (s.phase !== "lobby") return setErr("Game already in progress");
-          if (s.players.length >= 12) return setErr("Room is full");
-          if (!s.players.find(p => p.id === pid)) {
-            s.players.push({ id:pid, nickname:nick.trim(), score:0 });
-            await storage.set(rKey(c), JSON.stringify(s));
+          const res = await fetch("/api/room/join", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ code: c, pid, nickname: nick.trim() }),
+          });
+          if (res.status === 404) return setErr("Room not found");
+          if (res.status === 409) {
+            const d = await res.json();
+            if (d.error === "not_in_lobby") return setErr("Game already in progress");
+            if (d.error === "room_full") return setErr("Room is full");
           }
+          if (res.status === 429) {
+            const d = await res.json();
+            return setErr(`Too many attempts — try again in ${d.retryAfterSec}s`);
+          }
+          if (!res.ok) return setErr("Failed to join — check the code");
           try {
             localStorage.setItem(NICK_STORAGE_KEY, nick.trim());
             localStorage.setItem(LAST_ROOM_STORAGE_KEY, c);
           } catch {}
-          setCode(c); setGs(s); setView("game");
-        } catch { setErr("Failed to join — check the code"); }
+          setCode(c);
+          setView("game");
+        } catch { setErr("Failed to join — check your connection"); }
       }}
     />
     </ThemeCtx.Provider>
