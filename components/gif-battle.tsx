@@ -1238,6 +1238,9 @@ function HomeScreen({ nick, setNick, joinIn, setJoinIn, err, setErr, onCreate, o
           </div>
           <div style={{color:C.muted, fontSize:11, letterSpacing:5, fontWeight:600}}>PICK · VOTE · GLORY</div>
           <div style={{marginTop:12,color:C.muted,fontSize:13,lineHeight:1.6}}>
+            A fast online party game for remote teams, coworker happy hours, and friend groups.
+          </div>
+          <div style={{marginTop:6,color:C.muted,fontSize:13,lineHeight:1.6}}>
             Create a room, submit your funniest GIF answers, vote head-to-head, and win the scoreboard.
           </div>
         </div>
@@ -1249,6 +1252,17 @@ function HomeScreen({ nick, setNick, joinIn, setJoinIn, err, setErr, onCreate, o
         <input style={g.inp} placeholder="Room code (e.g. AB12CD)" value={joinIn} maxLength={6}
           onChange={e=>{setJoinIn(e.target.value.toUpperCase());setErr("");}} onKeyDown={e=>e.key==="Enter"&&onJoin()} />
         <button className="gbtn" style={{...g.btn,...g.btnS,marginBottom:0}} onClick={onJoin}>🚪 Join Room</button>
+        <div style={{marginTop:14,padding:"12px 14px",borderRadius:10,background:C.card2,border:`1px solid ${C.muted}22`}}>
+          <div style={{fontSize:11,color:C.muted,letterSpacing:2,marginBottom:8,fontWeight:700}}>HOW TO PLAY</div>
+          <div style={{fontSize:13,lineHeight:1.7,color:C.text}}>
+            1. Create a room and share the 6-character code.<br/>
+            2. Submit your funniest GIF answer for each prompt.<br/>
+            3. Vote in head-to-head matchups until one winner remains.
+          </div>
+          <div style={{marginTop:8,fontSize:12,lineHeight:1.6,color:C.muted}}>
+            Great for virtual team building, remote happy hours, and quick coworker icebreakers.
+          </div>
+        </div>
         <div style={{marginTop:12,textAlign:"center",fontSize:12,color:C.muted,lineHeight:1.6}}>
           Questions or suggestions? Open an{" "}
           <a href="https://github.com/gozhiyuan/gifbattle/issues" target="_blank" rel="noreferrer" style={{color:C.cyan,textDecoration:"underline"}}>
