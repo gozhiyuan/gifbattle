@@ -157,7 +157,7 @@ export async function checkIpRateLimit(
   action: "create" | "join",
   ip: string
 ): Promise<{ allowed: boolean; retryAfterSec: number }> {
-  const limits: Record<string, number> = { create: 5, join: 30 };
+  const limits: Record<"create" | "join", number> = { create: 5, join: 30 };
   const now = Date.now();
   const window = Math.floor(now / MINUTE_MS);
   const key = `gifbattle:rl:${action}:ip:${ip}:${window}`;
