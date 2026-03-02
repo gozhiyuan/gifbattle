@@ -2,7 +2,7 @@ import type { Metadata } from "next";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "GIF Battle",
+  title: "GIF Battles",
   description: "Pick GIFs. Vote for the funniest. Win eternal glory.",
 };
 

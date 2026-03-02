@@ -1,13 +1,15 @@
 import { Redis } from "@upstash/redis";
 import { NextRequest, NextResponse } from "next/server";
 import {
+  ACTIVE_ROOM_TTL_SECS,
+  GAME_OVER_ROOM_TTL_SECS,
   isValidRoomPlayerToken,
+  LOBBY_ROOM_TTL_SECS,
   revokeRoomPlayerToken,
   upsertRoomGeminiKey,
 } from "@/lib/room-security";
 
 const redis = Redis.fromEnv();
-const ROOM_TTL = 86400;
 const ROOM_CODE_RE = /^[A-Z0-9]{6}$/;
 
 type LeaveResult = {
@@ -15,6 +17,16 @@ type LeaveResult = {
   hostChanged?: boolean;
   newHostId?: string | null;
   leftNickname?: string;
+};
+
+const revokeTokenOrError = async (code: string, playerId: string) => {
+  try {
+    await revokeRoomPlayerToken(code, playerId);
+    return null;
+  } catch (error) {
+    console.error("room_leave_revoke_token_failed", { code, playerId, error });
+    return NextResponse.json({ error: "leave_failed" }, { status: 500 });
+  }
 };
 
 // Atomic Lua script: remove player, optionally migrate host, persist room.
@@ -58,7 +70,13 @@ if wasHost then
   redis.call('DEL', KEYS[2])
 end
 redis.call('SET', KEYS[1], cjson.encode(room))
-redis.call('EXPIRE', KEYS[1], tonumber(ARGV[2]))
+local ttl = tonumber(ARGV[2])
+if room['phase'] == 'lobby' then
+  ttl = tonumber(ARGV[3])
+elseif room['phase'] == 'game_over' then
+  ttl = tonumber(ARGV[4])
+end
+redis.call('EXPIRE', KEYS[1], ttl)
 return cjson.encode({status='LEFT', hostChanged=hostChanged, newHostId=newHostId, leftNickname=leftNickname})
 `;
 
@@ -90,33 +108,69 @@ export async function POST(req: NextRequest) {
 
   const key = `gifbattle:room:${c}`;
   const heartbeatKey = `gifbattle:hb:${c}`;
-  const rawResult = (await redis["eval"](LEAVE_SCRIPT, [key, heartbeatKey], [playerId, String(ROOM_TTL)])) as string;
-
-  let result: LeaveResult = {};
+  let rawResult = "";
   try {
-    result = JSON.parse(rawResult) as LeaveResult;
-  } catch {
-    result = {};
+    rawResult = (await redis["eval"](
+      LEAVE_SCRIPT,
+      [key, heartbeatKey],
+      [
+        playerId,
+        String(ACTIVE_ROOM_TTL_SECS),
+        String(LOBBY_ROOM_TTL_SECS),
+        String(GAME_OVER_ROOM_TTL_SECS),
+      ]
+    )) as string;
+  } catch (error) {
+    console.error("room_leave_eval_failed", { code: c, playerId, error });
+    return NextResponse.json({ error: "leave_failed" }, { status: 500 });
+  }
+  if (typeof rawResult !== "string") {
+    console.error("room_leave_eval_unexpected_result", { code: c, playerId, rawResult });
+    return NextResponse.json({ error: "leave_failed" }, { status: 500 });
   }
 
-  await revokeRoomPlayerToken(c, playerId);
+  let result: LeaveResult;
+  try {
+    result = JSON.parse(rawResult) as LeaveResult;
+  } catch (error) {
+    console.error("room_leave_parse_failed", { code: c, playerId, rawResult, error });
+    return NextResponse.json({ error: "leave_failed" }, { status: 500 });
+  }
 
   switch (result.status) {
-    case "NOT_IN_ROOM":
+    case "NOT_IN_ROOM": {
+      const revokeError = await revokeTokenOrError(c, playerId);
+      if (revokeError) return revokeError;
       return NextResponse.json({ ok: true, alreadyLeft: true });
-    case "ROOM_NOT_FOUND":
+    }
+    case "ROOM_NOT_FOUND": {
+      const revokeError = await revokeTokenOrError(c, playerId);
+      if (revokeError) return revokeError;
       return NextResponse.json({ error: "room_not_found" }, { status: 404 });
-    case "ROOM_CLOSED":
-      await upsertRoomGeminiKey(c, "");
+    }
+    case "ROOM_CLOSED": {
+      try {
+        await upsertRoomGeminiKey(c, "");
+      } catch (error) {
+        console.error("room_leave_gemini_cleanup_failed", { code: c, playerId, error });
+        return NextResponse.json({ error: "leave_failed" }, { status: 500 });
+      }
+      const revokeError = await revokeTokenOrError(c, playerId);
+      if (revokeError) return revokeError;
       return NextResponse.json({ ok: true, roomClosed: true, leftNickname: result.leftNickname || "" });
-    case "LEFT":
+    }
+    case "LEFT": {
+      const revokeError = await revokeTokenOrError(c, playerId);
+      if (revokeError) return revokeError;
       return NextResponse.json({
         ok: true,
         hostChanged: Boolean(result.hostChanged),
         newHostId: typeof result.newHostId === "string" ? result.newHostId : null,
         leftNickname: result.leftNickname || "",
       });
+    }
     default:
+      console.error("room_leave_unknown_status", { code: c, playerId, status: result.status });
       return NextResponse.json({ error: "unknown_error" }, { status: 500 });
   }
 }

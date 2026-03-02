@@ -1,9 +1,12 @@
 import { Redis } from "@upstash/redis";
 import { NextRequest, NextResponse } from "next/server";
-import { checkIpRateLimit, issueRoomPlayerToken } from "@/lib/room-security";
+import {
+  checkIpRateLimit,
+  issueRoomPlayerToken,
+  LOBBY_ROOM_TTL_SECS,
+} from "@/lib/room-security";
 
 const redis = Redis.fromEnv();
-const ROOM_TTL = 86400;
 const ROOM_CODE_RE = /^[A-Z0-9]{6}$/;
 
 // Atomic Lua script: reads room, enforces phase + capacity, appends player, re-saves.
@@ -23,6 +26,7 @@ end
 local players = room['players'] or {}
 for _, p in ipairs(players) do
   if p['id'] == ARGV[1] then
+    redis.call('EXPIRE', KEYS[1], tonumber(ARGV[3]))
     return 'ALREADY_JOINED'
   end
 end
@@ -67,12 +71,30 @@ export async function POST(req: NextRequest) {
   const c = code.trim().toUpperCase();
   const key = `gifbattle:room:${c}`;
 
-  const result = (await redis["eval"](JOIN_SCRIPT, [key], [pid, nickname.trim(), String(ROOM_TTL)])) as string;
+  let result = "";
+  try {
+    result = (await redis["eval"](
+      JOIN_SCRIPT,
+      [key],
+      [pid, nickname.trim(), String(LOBBY_ROOM_TTL_SECS)]
+    )) as string;
+  } catch (error) {
+    console.error("room_join_eval_failed", { code: c, pid, error });
+    return NextResponse.json({ error: "join_failed" }, { status: 500 });
+  }
 
   switch (result) {
     case "JOINED":
     case "ALREADY_JOINED": {
-      const token = await issueRoomPlayerToken(c, pid);
+      let token = "";
+      try {
+        token = await issueRoomPlayerToken(c, pid);
+      } catch (error) {
+        console.error("room_join_token_issue_failed", { code: c, pid, error });
+      }
+      if (!token) {
+        return NextResponse.json({ error: "token_issue_failed" }, { status: 503 });
+      }
       return NextResponse.json({ ok: true, code: c, token });
     }
     case "ROOM_NOT_FOUND":

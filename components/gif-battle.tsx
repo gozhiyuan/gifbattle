@@ -483,14 +483,16 @@ const storage = {
     return r.json(); // { value: string } | null
   },
   set: async (key: string, value: string) => {
-    await fetch("/api/store", {
+    const r = await fetch("/api/store", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ key, value }),
     });
+    if (!r.ok) throw new Error(`store_set_failed:${r.status}`);
   },
   del: async (key: string) => {
-    await fetch(`/api/store?key=${encodeURIComponent(key)}`, { method: "DELETE" });
+    const r = await fetch(`/api/store?key=${encodeURIComponent(key)}`, { method: "DELETE" });
+    if (!r.ok) throw new Error(`store_del_failed:${r.status}`);
   },
 };
 
@@ -644,6 +646,7 @@ export default function App() {
   const noticeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const prevGsRef = useRef<any>(null);
   const leavingRef = useRef(false);
+  const lobbyMissingPollsRef = useRef(0);
 
   useEffect(() => {
     try {
@@ -653,15 +656,34 @@ export default function App() {
       if (!savedRoom) return;
       storage.get(rKey(savedRoom))
         .then((r) => {
-          if (!r?.value) return;
-          const s = JSON.parse(r.value);
-          if (!s?.players?.some((p: { id: string }) => p.id === pid)) return;
+          if (!r?.value) {
+            clearRoomToken(savedRoom);
+            try { localStorage.removeItem(LAST_ROOM_STORAGE_KEY); } catch {}
+            return;
+          }
+          let s: any;
+          try {
+            s = JSON.parse(r.value);
+          } catch (error) {
+            console.error("session_restore_parse_failed", { savedRoom, error });
+            clearRoomToken(savedRoom);
+            try { localStorage.removeItem(LAST_ROOM_STORAGE_KEY); } catch {}
+            setErr("Saved room state was invalid. Please join the room again.");
+            return;
+          }
+          if (!s?.players?.some((p: { id: string }) => p.id === pid)) {
+            clearRoomToken(savedRoom);
+            try { localStorage.removeItem(LAST_ROOM_STORAGE_KEY); } catch {}
+            return;
+          }
           setCode(savedRoom);
           setGs(s);
           lastGsJson.current = r.value;
           setView("game");
         })
-        .catch(() => {});
+        .catch((error) => {
+          console.error("session_restore_failed", { savedRoom, error });
+        });
     } catch {}
   }, [pid]);
 
@@ -681,10 +703,17 @@ export default function App() {
   }, []);
 
   const fetchGs = useCallback(async (c?: string) => {
+    const roomCode = String(c || code || "").trim().toUpperCase();
     try {
-      const r = await storage.get(rKey(c || code));
+      const r = await storage.get(rKey(roomCode));
       if (r) {
-        const s = JSON.parse(r.value);
+        let s: any;
+        try {
+          s = JSON.parse(r.value);
+        } catch (error) {
+          console.error("fetch_room_state_parse_failed", { roomCode, error });
+          return null;
+        }
         // Only call setGs when the state actually changed — avoids flicker during voting
         if (r.value !== lastGsJson.current) {
           lastGsJson.current = r.value;
@@ -692,16 +721,21 @@ export default function App() {
         }
         return s;
       }
-    } catch {}
+    } catch (error) {
+      console.error("fetch_room_state_failed", { roomCode, error });
+    }
     return null;
   }, [code]);
 
   const writeGs = useCallback(async (state, c?: string) => {
+    const roomCode = String(c || code || "").trim().toUpperCase();
+    if (!roomCode) return null;
+    const token = getRoomToken(roomCode);
+    if (!token) {
+      console.warn("write_room_state_missing_token", { roomCode });
+      return null;
+    }
     try {
-      const roomCode = String(c || code || "").trim().toUpperCase();
-      if (!roomCode) return null;
-      const token = getRoomToken(roomCode);
-      if (!token) return null;
       const sanitizedState = { ...state };
       if ("geminiKey" in sanitizedState) delete sanitizedState.geminiKey;
       const json = JSON.stringify(sanitizedState);
@@ -711,13 +745,34 @@ export default function App() {
         body: JSON.stringify({ code: roomCode, pid, token, state: json }),
       });
       if (!res.ok) {
-        if (res.status === 403) clearRoomToken(roomCode);
+        console.error("write_room_state_failed", { roomCode, status: res.status });
+        if (res.status === 403) {
+          clearRoomToken(roomCode);
+          try { localStorage.removeItem(LAST_ROOM_STORAGE_KEY); } catch {}
+          if (roomCode === String(code || "").trim().toUpperCase()) {
+            clearTimeout(noticeTimerRef.current!);
+            prevGsRef.current = null;
+            setNotice("");
+            setView("home");
+            setGs(null);
+            setCode("");
+            setErr("Room authorization expired. Please join the room again.");
+          }
+        } else {
+          showNotice("Could not save the latest room update.");
+          setErr("Failed to sync room state. Please try again.");
+        }
         return null;
       }
       lastGsJson.current = json;
       setGs(sanitizedState); return sanitizedState;
-    } catch { return null; }
-  }, [code, pid]);
+    } catch (error) {
+      console.error("write_room_state_error", { roomCode, error });
+      showNotice("Room sync failed. Check your connection.");
+      setErr("Failed to sync room state. Check your connection and try again.");
+      return null;
+    }
+  }, [code, pid, showNotice]);
 
   const runEndGameCleanup = useCallback(async (state, opts?: { deleteImages?: boolean }) => {
     const roomCode = String(state?.code || code || "").trim().toUpperCase();
@@ -788,9 +843,12 @@ export default function App() {
       if (fresh.host !== cur.host) return;
       // Take over: write heartbeat first, then update room state
       await storage.set(hbKey(code), JSON.stringify({ pid, ts: Date.now() }));
-      await writeGs({ ...fresh, host: pid });
+      const migrated = await writeGs({ ...fresh, host: pid });
+      if (migrated) hbMissingSinceRef.current = null;
+    } catch (error) {
       hbMissingSinceRef.current = null;
-    } catch {}
+      console.error("host_migration_check_failed", { code, pid, error });
+    }
   }, [code, fetchGs, writeGs]);
 
   // Keep refs in sync so interval callbacks always see current state
@@ -849,7 +907,21 @@ export default function App() {
 
   useEffect(() => {
     if (view === "game" && code) {
-      pollRef.current = setInterval(() => fetchGs(), POLL_MS);
+      pollRef.current = setInterval(async () => {
+        const next = await fetchGs();
+        if (next) {
+          lobbyMissingPollsRef.current = 0;
+          return;
+        }
+        if (gsRef.current?.phase !== "lobby") {
+          lobbyMissingPollsRef.current = 0;
+          return;
+        }
+        lobbyMissingPollsRef.current += 1;
+        if (lobbyMissingPollsRef.current >= 2) {
+          leave({ notifyRoom: false, localMessage: "Lobby expired due to inactivity. Please create or join a new room." });
+        }
+      }, POLL_MS);
       // Stagger: host writes heartbeat every 8s starting immediately;
       // non-hosts check for stale host every 8s starting at 4s offset.
       const hbDelay = setTimeout(() => {
@@ -865,6 +937,7 @@ export default function App() {
         clearInterval(pollRef.current);
         clearInterval(hbIntervalRef.current!);
         hbMissingSinceRef.current = null;
+        lobbyMissingPollsRef.current = 0;
         clearTimeout(hbDelay);
       };
     }
@@ -918,8 +991,10 @@ export default function App() {
             body: JSON.stringify({ pid, nickname: nick.trim() }),
           });
           if (res.status === 429) {
-            const d = await res.json();
-            return setErr(`Too many attempts — try again in ${d.retryAfterSec}s`);
+            let d: { retryAfterSec?: number } = {};
+            try { d = await res.json(); } catch {}
+            const retryIn = typeof d.retryAfterSec === "number" ? `${d.retryAfterSec}s` : "a moment";
+            return setErr(`Too many attempts — try again in ${retryIn}`);
           }
           if (!res.ok) return setErr("Failed to create room, please try again");
           const { code: c, token } = await res.json();
@@ -1135,7 +1210,7 @@ function MissingGiphyConfig() {
   return (
     <div style={g.page}>
       <div style={g.card}>
-        <div style={g.h1}>GIF BATTLE</div>
+        <div style={g.h1}>GIF BATTLES</div>
         <div style={g.sub}>GIPHY is not configured for this deployment</div>
         <div style={{background:C.card2,borderRadius:12,padding:"14px 16px",marginBottom:16,fontSize:13,lineHeight:1.9,color:C.muted,border:`1px solid ${C.muted}22`}}>
           <div style={{color:C.text,fontWeight:700,marginBottom:6,fontSize:14}}>Fix deployment config:</div>
@@ -1159,9 +1234,12 @@ function HomeScreen({ nick, setNick, joinIn, setJoinIn, err, setErr, onCreate, o
         <div style={{textAlign:"center", marginBottom:28}}>
           <div style={{fontSize:72, fontWeight:900, fontFamily:"'Bebas Neue', sans-serif", letterSpacing:5, display:"inline-block",
             color:C.text, lineHeight:1, marginBottom:6, textShadow:`0 2px 0 ${C.bg}, 0 0 28px ${C.accent}55`}}>
-            GIF BATTLE
+            GIF BATTLES
           </div>
           <div style={{color:C.muted, fontSize:11, letterSpacing:5, fontWeight:600}}>PICK · VOTE · GLORY</div>
+          <div style={{marginTop:12,color:C.muted,fontSize:13,lineHeight:1.6}}>
+            Create a room, submit your funniest GIF answers, vote head-to-head, and win the scoreboard.
+          </div>
         </div>
         {err && <div style={g.err}>⚠ {err}</div>}
         <input style={g.inp} placeholder="Your nickname" value={nick} maxLength={20}
@@ -1171,6 +1249,17 @@ function HomeScreen({ nick, setNick, joinIn, setJoinIn, err, setErr, onCreate, o
         <input style={g.inp} placeholder="Room code (e.g. AB12CD)" value={joinIn} maxLength={6}
           onChange={e=>{setJoinIn(e.target.value.toUpperCase());setErr("");}} onKeyDown={e=>e.key==="Enter"&&onJoin()} />
         <button className="gbtn" style={{...g.btn,...g.btnS,marginBottom:0}} onClick={onJoin}>🚪 Join Room</button>
+        <div style={{marginTop:12,textAlign:"center",fontSize:12,color:C.muted,lineHeight:1.6}}>
+          Questions or suggestions? Open an{" "}
+          <a href="https://github.com/gozhiyuan/gifbattle/issues" target="_blank" rel="noreferrer" style={{color:C.cyan,textDecoration:"underline"}}>
+            issue
+          </a>
+          {" "}or submit a{" "}
+          <a href="https://github.com/gozhiyuan/gifbattle/pulls" target="_blank" rel="noreferrer" style={{color:C.cyan,textDecoration:"underline"}}>
+            PR
+          </a>
+          .
+        </div>
       </div>
     </div>
   );
@@ -1495,6 +1584,19 @@ function Lobby({ gs, pid, code, isHost, startGame, leave, writeGs }) {
               {/* Gemini key config */}
               <div style={{background:`${C.bg}88`,borderRadius:8,padding:"10px 12px",marginBottom:10}}>
                 <div style={{fontSize:11,color:C.muted,letterSpacing:2,marginBottom:6}}>GEMINI API KEY</div>
+                <div style={{fontSize:12,color:C.muted,lineHeight:1.6,marginBottom:8}}>
+                  Needed for AI prompt/image generation in this room.
+                  Get a key from{" "}
+                  <a
+                    href="https://aistudio.google.com/app/apikey"
+                    target="_blank"
+                    rel="noreferrer"
+                    style={{color:C.cyan,textDecoration:"underline"}}
+                  >
+                    Google AI Studio
+                  </a>
+                  . The key is room-scoped, not shown to other players, and is auto-cleared at game over.
+                </div>
                 {!editingKey ? (
                   <div style={{display:"flex",alignItems:"center",gap:8}}>
                     <span style={{fontSize:13,flex:1,color:roomKeySet?C.green:C.muted}}>
@@ -2369,7 +2471,7 @@ function GameOver({ gs, writeGs, pid, runEndGameCleanup }) {
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>GIF Battle Results ${escapeHtml(gs.code || "")}</title>
+  <title>GIF Battles Results ${escapeHtml(gs.code || "")}</title>
   <style>
     :root { color-scheme: dark; }
     body { margin: 0; padding: 28px; background: #0b0b17; color: #ececff; font-family: "DM Sans", system-ui, -apple-system, sans-serif; }
@@ -2395,7 +2497,7 @@ function GameOver({ gs, writeGs, pid, runEndGameCleanup }) {
   </style>
 </head>
 <body>
-  <h1>GIF BATTLE RESULTS</h1>
+  <h1>GIF BATTLES RESULTS</h1>
   <div class="sub">Room ${escapeHtml(gs.code || "")} · Generated ${escapeHtml(generatedAt)}</div>
   <div class="block">
     <h2>Final Scoreboard</h2>
@@ -2415,7 +2517,7 @@ function GameOver({ gs, writeGs, pid, runEndGameCleanup }) {
       const url = URL.createObjectURL(blob);
       const a = document.createElement("a");
       a.href = url;
-      a.download = `gifbattle-results-${(gs.code || "room").toLowerCase()}-${timestamp}.html`;
+      a.download = `gifbattles-results-${(gs.code || "room").toLowerCase()}-${timestamp}.html`;
       document.body.appendChild(a);
       a.click();
       a.remove();

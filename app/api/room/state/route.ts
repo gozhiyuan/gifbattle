@@ -1,24 +1,30 @@
 import { Redis } from "@upstash/redis";
 import { NextRequest, NextResponse } from "next/server";
 import {
+  ACTIVE_ROOM_TTL_SECS,
+  GAME_OVER_ROOM_TTL_SECS,
   getRoomState,
   isRoomPlayer,
   isValidRoomPlayerToken,
+  LOBBY_ROOM_TTL_SECS,
 } from "@/lib/room-security";
 
 const redis = Redis.fromEnv();
-const ROOM_TTL = 86400;
 
-const sanitizeRoomJson = (json: string): string => {
+const parseRoomState = (json: string): Record<string, unknown> | null => {
   try {
     const parsed = JSON.parse(json);
-    if (parsed && typeof parsed === "object" && "geminiKey" in parsed) {
-      delete (parsed as Record<string, unknown>).geminiKey;
-    }
-    return JSON.stringify(parsed);
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return null;
+    return parsed as Record<string, unknown>;
   } catch {
-    return json;
+    return null;
   }
+};
+
+const ttlForPhase = (state: Record<string, unknown>): number => {
+  if (state.phase === "lobby") return LOBBY_ROOM_TTL_SECS;
+  if (state.phase === "game_over") return GAME_OVER_ROOM_TTL_SECS;
+  return ACTIVE_ROOM_TTL_SECS;
 };
 
 export async function POST(req: NextRequest) {
@@ -50,7 +56,15 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "forbidden" }, { status: 403 });
   }
 
-  const sanitized = sanitizeRoomJson(state);
-  await redis.set(`gifbattle:room:${code}`, sanitized, { ex: ROOM_TTL });
+  const parsedState = parseRoomState(state);
+  if (!parsedState) {
+    return NextResponse.json({ error: "invalid_state_json" }, { status: 400 });
+  }
+  if ("geminiKey" in parsedState) {
+    delete parsedState.geminiKey;
+  }
+
+  const sanitized = JSON.stringify(parsedState);
+  await redis.set(`gifbattle:room:${code}`, sanitized, { ex: ttlForPhase(parsedState) });
   return NextResponse.json({ ok: true });
 }
