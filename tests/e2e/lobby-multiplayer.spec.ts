@@ -52,8 +52,9 @@ test("cannot join after game has started", async ({ browser }) => {
 
   // Manually set room phase to "submitting" in the store (simulates game started)
   const key = `gifbattle:room:${roomCode}`;
-  const raw = store.get(key)!;
-  const room = JSON.parse(raw);
+  const raw = store.get(key);
+  expect(raw).toBeDefined();
+  const room = JSON.parse(raw!);
   room.phase = "submitting";
   store.set(key, JSON.stringify(room));
 
