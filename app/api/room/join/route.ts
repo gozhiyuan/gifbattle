@@ -25,9 +25,7 @@ for _, p in ipairs(players) do
     return 'ALREADY_JOINED'
   end
 end
-local maxP = tonumber(room['maxCompetitors'])
-if maxP == nil then maxP = 12 end
-if #players >= maxP then
+if #players >= 12 then
   return 'ROOM_FULL'
 end
 table.insert(players, {id=ARGV[1], nickname=ARGV[2], score=0})
@@ -38,7 +36,7 @@ return 'JOINED'
 `;
 
 export async function POST(req: NextRequest) {
-  const ip = req.headers.get("x-real-ip") ?? req.headers.get("x-forwarded-for")?.split(",").at(-1)?.trim() ?? "0.0.0.0";
+  const ip = req.headers.get("x-real-ip") ?? req.headers.get("x-forwarded-for")?.split(",")[0].trim() ?? "0.0.0.0";
   const rl = await checkIpRateLimit("join", ip);
   if (!rl.allowed) {
     return NextResponse.json(

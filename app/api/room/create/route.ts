@@ -9,7 +9,7 @@ const MAX_RETRIES = 5;
 const genCode = () => Math.random().toString(36).slice(2, 8).toUpperCase();
 
 export async function POST(req: NextRequest) {
-  const ip = req.headers.get("x-real-ip") ?? req.headers.get("x-forwarded-for")?.split(",").at(-1)?.trim() ?? "0.0.0.0";
+  const ip = req.headers.get("x-real-ip") ?? req.headers.get("x-forwarded-for")?.split(",")[0].trim() ?? "0.0.0.0";
   const rl = await checkIpRateLimit("create", ip);
   if (!rl.allowed) {
     return NextResponse.json(
