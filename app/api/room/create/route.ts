@@ -1,6 +1,6 @@
 import { Redis } from "@upstash/redis";
 import { NextRequest, NextResponse } from "next/server";
-import { checkIpRateLimit } from "@/lib/room-security";
+import { checkIpRateLimit, issueRoomPlayerToken } from "@/lib/room-security";
 
 const redis = Redis.fromEnv();
 const ROOM_TTL = 86400;
@@ -62,7 +62,8 @@ export async function POST(req: NextRequest) {
     const key = `gifbattle:room:${code}`;
     const result = await redis.set(key, JSON.stringify(roomState), { nx: true, ex: ROOM_TTL });
     if (result !== null) {
-      return NextResponse.json({ code });
+      const token = await issueRoomPlayerToken(code, pid);
+      return NextResponse.json({ code, token });
     }
   }
 

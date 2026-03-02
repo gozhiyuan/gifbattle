@@ -8,5 +8,5 @@ test("home screen validates nickname and room code", async ({ page }) => {
 
   await page.getByPlaceholder("Your nickname").fill("Tester");
   await page.getByRole("button", { name: /join room/i }).click();
-  await expect(page.getByText("Enter a valid room code")).toBeVisible();
+  await expect(page.getByText("Enter a valid 6-character room code")).toBeVisible();
 });

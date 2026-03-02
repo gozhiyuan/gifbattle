@@ -9,6 +9,7 @@ const VOTE_SECS = 12;        // seconds per voting matchup
 const SUBMIT_SECS = 60;      // seconds per GIF question (total = SUBMIT_SECS * rounds)
 const RESULTS_SECS = 5;      // seconds to show round results before auto-advancing
 const HOST_STALE_MS = 40000; // allow more background-tab delay before host takeover
+const NOTICE_MS = 5000;
 
 const PROMPTS = [
   "When you realize it's Monday tomorrow",
@@ -288,11 +289,22 @@ const getEligibleCompetitors = (playerCount: number, maxCompetitors: number) => 
   return capped % 2 === 0 ? capped : capped - 1;
 };
 
-const pickPrompts = (pool: string[], count: number) => {
-  const shuffled = [...pool].sort(() => Math.random() - 0.5);
-  if (count <= shuffled.length) return shuffled.slice(0, count);
-  const picked = [...shuffled];
-  while (picked.length < count) picked.push(pool[Math.floor(Math.random() * pool.length)]);
+const pickPrompts = (pool: string[], count: number, avoid: string[] = []) => {
+  const avoidSet = new Set(avoid.filter(Boolean));
+  const preferred = pool.filter((p) => !avoidSet.has(p));
+  const preferredShuffled = [...preferred].sort(() => Math.random() - 0.5);
+  const allShuffled = [...pool].sort(() => Math.random() - 0.5);
+
+  if (count <= preferredShuffled.length) return preferredShuffled.slice(0, count);
+
+  const picked = [...preferredShuffled];
+  for (const candidate of allShuffled) {
+    if (picked.length >= count) break;
+    if (!picked.includes(candidate)) picked.push(candidate);
+  }
+  while (picked.length < count && pool.length > 0) {
+    picked.push(pool[Math.floor(Math.random() * pool.length)]);
+  }
   return picked;
 };
 
@@ -324,11 +336,12 @@ const buildPromptsForPlan = (
   rounds: number,
   namePromptRounds: number,
   playerNameById: Map<string, string>,
-  customPromptPool: string[] = []
+  customPromptPool: string[] = [],
+  recentPrompts: string[] = []
 ) => {
   const nameCycles = pickCycles(rounds, namePromptRounds);
   const nameSlots = plan.filter(p => nameCycles.has(p.cycle)).length;
-  const standardPrompts = pickPrompts(pool, Math.max(0, plan.length - nameSlots));
+  const standardPrompts = pickPrompts(pool, Math.max(0, plan.length - nameSlots), recentPrompts);
   let standardIdx = 0;
 
   const pickedPrompts = plan.map((entry) => {
@@ -430,6 +443,7 @@ const buildMatchupsFromEligible = (eligible: string[]) => {
 const PID_STORAGE_KEY = "gifbattle_pid";
 const NICK_STORAGE_KEY = "gifbattle_nick";
 const LAST_ROOM_STORAGE_KEY = "gifbattle_last_room";
+const ROOM_TOKEN_KEY_PREFIX = "gifbattle_room_token:";
 const getStablePid = () => {
   if (typeof window === "undefined") return Math.random().toString(36).slice(2, 10);
   try {
@@ -447,6 +461,19 @@ const TAB_ID = getStablePid();
 const rKey = c => `gifbattle:room:${c}`;
 const vKey = (c, round, mi, pid) => `gifbattle:vote:${c}:${round}:${mi}:${pid}`;
 const hbKey = c => `gifbattle:hb:${c}`;
+const roomTokenKey = (code: string) => `${ROOM_TOKEN_KEY_PREFIX}${code}`;
+const getRoomToken = (code: string) => {
+  if (!code) return "";
+  try { return localStorage.getItem(roomTokenKey(code)) || ""; } catch { return ""; }
+};
+const setRoomToken = (code: string, token: string) => {
+  if (!code) return;
+  try { localStorage.setItem(roomTokenKey(code), token || ""); } catch {}
+};
+const clearRoomToken = (code: string) => {
+  if (!code) return;
+  try { localStorage.removeItem(roomTokenKey(code)); } catch {}
+};
 
 // ── KV storage shim — calls /api/store instead of window.storage ──────────────
 const storage = {
@@ -605,6 +632,7 @@ export default function App() {
   const [joinIn, setJoinIn] = useState("");
   const [gs, setGs] = useState(null);
   const [err, setErr] = useState("");
+  const [notice, setNotice] = useState("");
   const pollRef = useRef(null);
   const transitioning = useRef(false);
   const lastGsJson = useRef<string | null>(null);
@@ -613,6 +641,9 @@ export default function App() {
   const hbIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const hbMissingSinceRef = useRef<number | null>(null);
   const endCleanupRef = useRef<Record<string, { base: boolean; images: boolean }>>({});
+  const noticeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const prevGsRef = useRef<any>(null);
+  const leavingRef = useRef(false);
 
   useEffect(() => {
     try {
@@ -640,6 +671,15 @@ export default function App() {
     } catch {}
   }, [nick]);
 
+  useEffect(() => () => { clearTimeout(noticeTimerRef.current!); }, []);
+
+  const showNotice = useCallback((message: string) => {
+    if (!message) return;
+    setNotice(message);
+    clearTimeout(noticeTimerRef.current!);
+    noticeTimerRef.current = setTimeout(() => setNotice(""), NOTICE_MS);
+  }, []);
+
   const fetchGs = useCallback(async (c?: string) => {
     try {
       const r = await storage.get(rKey(c || code));
@@ -658,14 +698,26 @@ export default function App() {
 
   const writeGs = useCallback(async (state, c?: string) => {
     try {
+      const roomCode = String(c || code || "").trim().toUpperCase();
+      if (!roomCode) return null;
+      const token = getRoomToken(roomCode);
+      if (!token) return null;
       const sanitizedState = { ...state };
       if ("geminiKey" in sanitizedState) delete sanitizedState.geminiKey;
       const json = JSON.stringify(sanitizedState);
-      await storage.set(rKey(c || code), json);
+      const res = await fetch("/api/room/state", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ code: roomCode, pid, token, state: json }),
+      });
+      if (!res.ok) {
+        if (res.status === 403) clearRoomToken(roomCode);
+        return null;
+      }
       lastGsJson.current = json;
       setGs(sanitizedState); return sanitizedState;
     } catch { return null; }
-  }, [code]);
+  }, [code, pid]);
 
   const runEndGameCleanup = useCallback(async (state, opts?: { deleteImages?: boolean }) => {
     const roomCode = String(state?.code || code || "").trim().toUpperCase();
@@ -747,6 +799,47 @@ export default function App() {
     isHostRef.current = gs?.host === pid;
   }, [gs]);
 
+  // Show room lifecycle notices (player left, host changed) based on state diffs.
+  useEffect(() => {
+    if (view !== "game" || !gs) {
+      prevGsRef.current = gs;
+      return;
+    }
+    const prev = prevGsRef.current;
+    if (!prev) {
+      prevGsRef.current = gs;
+      return;
+    }
+    const prevPlayers = (Array.isArray(prev.players) ? prev.players : []) as Array<{ id: string; nickname?: string }>;
+    const curPlayers = (Array.isArray(gs.players) ? gs.players : []) as Array<{ id: string; nickname?: string }>;
+    const prevById = new Map<string, { id: string; nickname?: string }>(prevPlayers.map((p) => [p.id, p]));
+    const curById = new Map<string, { id: string; nickname?: string }>(curPlayers.map((p) => [p.id, p]));
+    const leftPlayers = prevPlayers.filter((p) => !curById.has(p.id));
+
+    if (!leavingRef.current) {
+      if (leftPlayers.length > 0) {
+        const locationLabel = gs.phase === "lobby" ? "the lobby" : "the game";
+        const leftHost = leftPlayers.find((p) => p.id === prev.host);
+        if (leftHost) {
+          const hostName = leftHost.nickname || "Host";
+          const nextHostName = gs.host && curById.get(gs.host)?.nickname;
+          if (nextHostName) showNotice(`${hostName} left. ${nextHostName} is now host.`);
+          else showNotice(`${hostName} left ${locationLabel}.`);
+        } else if (leftPlayers.length === 1) {
+          const who = leftPlayers[0].nickname || "A player";
+          showNotice(`${who} left ${locationLabel}.`);
+        } else {
+          showNotice(`${leftPlayers.length} players left ${locationLabel}.`);
+        }
+      } else if (prev.host !== gs.host && gs.host !== pid) {
+        const nextHostName = gs.host ? (curById.get(gs.host)?.nickname || "A player") : "A player";
+        showNotice(`${nextHostName} is now host.`);
+      }
+    }
+
+    prevGsRef.current = gs;
+  }, [gs, pid, showNotice, view]);
+
   // Write initial heartbeat whenever this client becomes (or remains) host
   useEffect(() => {
     if (view === "game" && code && gs?.host === pid) {
@@ -780,16 +873,36 @@ export default function App() {
   // Detect when this player has been kicked from the lobby
   useEffect(() => {
     if (gs && view === "game" && gs.phase === "lobby" && !gs.players.find(p => p.id === pid)) {
-      leave();
+      leave({ notifyRoom: false, localMessage: "You were removed from the lobby." });
     }
   }, [gs]);
 
-  const leave = () => {
+  const leave = (opts?: { notifyRoom?: boolean; localMessage?: string }) => {
+    if (leavingRef.current) return;
+    leavingRef.current = true;
+    const roomCode = String(code || "").trim().toUpperCase();
+    const token = getRoomToken(roomCode);
     clearInterval(pollRef.current);
     clearInterval(hbIntervalRef.current!);
     hbMissingSinceRef.current = null;
+    if ((opts?.notifyRoom ?? true) && roomCode && token) {
+      fetch("/api/room/leave", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ code: roomCode, pid, token }),
+        keepalive: true,
+      }).catch(() => {});
+    }
+    clearRoomToken(roomCode);
     try { localStorage.removeItem(LAST_ROOM_STORAGE_KEY); } catch {}
-    setView("home"); setGs(null); setCode(""); setErr("");
+    clearTimeout(noticeTimerRef.current!);
+    prevGsRef.current = null;
+    setNotice("");
+    setView("home");
+    setGs(null);
+    setCode("");
+    setErr(opts?.localMessage || "");
+    leavingRef.current = false;
   };
 
   if (view === "home") return (
@@ -809,7 +922,9 @@ export default function App() {
             return setErr(`Too many attempts — try again in ${d.retryAfterSec}s`);
           }
           if (!res.ok) return setErr("Failed to create room, please try again");
-          const { code: c } = await res.json();
+          const { code: c, token } = await res.json();
+          if (!c || typeof token !== "string" || !token) return setErr("Failed to create room, please try again");
+          setRoomToken(c, token);
           try {
             localStorage.setItem(NICK_STORAGE_KEY, nick.trim());
             localStorage.setItem(LAST_ROOM_STORAGE_KEY, c);
@@ -821,7 +936,7 @@ export default function App() {
       onJoin={async () => {
         if (!nick.trim()) return setErr("Enter a nickname");
         const c = joinIn.trim().toUpperCase();
-        if (c.length < 4) return setErr("Enter a valid room code");
+        if (!/^[A-Z0-9]{6}$/.test(c)) return setErr("Enter a valid 6-character room code");
         try {
           const res = await fetch("/api/room/join", {
             method: "POST",
@@ -842,6 +957,9 @@ export default function App() {
             return setErr(`Too many attempts — try again in ${d.retryAfterSec ?? "a moment"}`);
           }
           if (!res.ok) return setErr("Failed to join — check the code");
+          const data = await res.json();
+          if (typeof data?.token !== "string" || !data.token) return setErr("Failed to join — check the code");
+          setRoomToken(c, data.token);
           try {
             localStorage.setItem(NICK_STORAGE_KEY, nick.trim());
             localStorage.setItem(LAST_ROOM_STORAGE_KEY, c);
@@ -876,10 +994,21 @@ export default function App() {
     const plan = buildRoundPlan(players.map(p => p.id), rounds, maxC);
     if (plan.length === 0) return alert("Not enough players to build matchups");
     const playerNameById = new Map(players.map(p => [p.id, p.nickname]));
-    const prompts = buildPromptsForPlan(pool, plan, rounds, namePromptRounds, playerNameById, customPromptPool);
+    const previousPrompts: string[] = Array.isArray(fresh.usedPrompts) && fresh.usedPrompts.length > 0
+      ? (fresh.usedPrompts as string[])
+      : (Array.isArray(fresh.prompts) ? (fresh.prompts as string[]) : []);
+    const prompts = buildPromptsForPlan(
+      pool,
+      plan,
+      rounds,
+      namePromptRounds,
+      playerNameById,
+      customPromptPool,
+      previousPrompts
+    );
     await writeGs({
       ...fresh, phase:"submitting", prompts, submissions:{}, doneSubmitting:[], votingRound:0,
-      matchups:[], currentMatchup:0, roundMatchupWins:{}, voteDeadline:null, usedPrompts:[], roundPlan:plan,
+      matchups:[], currentMatchup:0, roundMatchupWins:{}, voteDeadline:null, usedPrompts: prompts, roundPlan:plan,
       submitDeadline: Date.now() + (fresh.submitSecs ?? SUBMIT_SECS) * rounds * 1000
     });
   };
@@ -953,6 +1082,30 @@ export default function App() {
   return (
     <ThemeCtx.Provider value={themeCtxVal}>
       <ThemeToggle />
+      {notice && (
+        <div role="status" style={{
+          position:"fixed", top:16, left:"50%", transform:"translateX(-50%)",
+          zIndex:1000, background:C.card2, color:C.text, border:`1px solid ${C.cyan}66`,
+          borderRadius:10, padding:"10px 14px", boxShadow:"0 6px 22px rgba(0,0,0,0.25)",
+          fontSize:13, maxWidth:460, width:"calc(100% - 40px)", textAlign:"center",
+        }}>
+          {notice}
+        </div>
+      )}
+      {gs.phase !== "lobby" && (
+        <button
+          className="gbtn"
+          onClick={() => { if (window.confirm("Leave this game?")) leave(); }}
+          style={{
+            position:"fixed", top:16, left:16, zIndex:1001,
+            background:C.card2, border:`1px solid ${C.muted}66`, color:C.text,
+            borderRadius:10, padding:"8px 12px", cursor:"pointer", fontSize:13,
+            boxShadow:"0 4px 16px rgba(0,0,0,0.2)",
+          }}
+        >
+          ← Leave
+        </button>
+      )}
       {gs.phase==="lobby"?<Lobby {...sp}/>:gs.phase==="submitting"?<Submit {...sp}/>:gs.phase==="voting"?<Voting {...sp}/>:gs.phase==="round_results"?<RoundResults {...sp}/>:gs.phase==="game_over"?<GameOver {...sp}/>:null}
     </ThemeCtx.Provider>
   );
@@ -2276,11 +2429,12 @@ function GameOver({ gs, writeGs, pid, runEndGameCleanup }) {
 
   const playAgain=async()=>{
     await runEndGameCleanup(gs, { deleteImages: true });
+    const recentPrompts = Array.isArray(gs.prompts) ? gs.prompts : (Array.isArray(gs.usedPrompts) ? gs.usedPrompts : []);
     await writeGs({
       ...gs, phase:"lobby",
       players:gs.players.map(p=>({...p,score:0})),
       prompts:[], submissions:{}, doneSubmitting:[], votingRound:0,
-      matchups:[], currentMatchup:0, roundMatchupWins:{}, submitDeadline:null, voteDeadline:null, usedPrompts:[], roundPlan:[],
+      matchups:[], currentMatchup:0, roundMatchupWins:{}, submitDeadline:null, voteDeadline:null, usedPrompts: recentPrompts, roundPlan:[],
       rounds: getRounds(gs),
       namePromptRounds: getNamePromptRounds(gs),
       customPrompts: gs.customPrompts || []

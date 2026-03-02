@@ -32,6 +32,85 @@ const IMAGE_BLOCK_REASONS = new Set([
   "SPII",
 ]);
 
+type ProviderImageResult = {
+  imageData: string;
+  mimeType: string;
+  blocked: boolean;
+};
+
+const isBlockedReason = (reason: string): boolean => {
+  const normalized = reason.trim().toUpperCase();
+  if (!normalized) return false;
+  return (
+    IMAGE_BLOCK_REASONS.has(normalized) ||
+    normalized.includes("SAFETY") ||
+    normalized.includes("BLOCK") ||
+    normalized.includes("PROHIBITED")
+  );
+};
+
+const extractInlineImage = (part: unknown): { data: string; mimeType: string } | null => {
+  if (!part || typeof part !== "object") return null;
+  const p = part as Record<string, unknown>;
+  const inlineRaw = (p.inlineData ?? p.inline_data) as Record<string, unknown> | undefined;
+  if (!inlineRaw || typeof inlineRaw !== "object") return null;
+
+  let data = "";
+  if (typeof inlineRaw.data === "string") data = inlineRaw.data;
+  if (!data && typeof inlineRaw.bytesBase64Encoded === "string") data = inlineRaw.bytesBase64Encoded;
+  data = data.trim();
+  if (!data) return null;
+
+  let mimeType = "";
+  if (typeof inlineRaw.mimeType === "string") mimeType = inlineRaw.mimeType.trim();
+  if (!mimeType && typeof inlineRaw.mime_type === "string") mimeType = inlineRaw.mime_type.trim();
+
+  const dataUrlMatch = /^data:([^;]+);base64,(.+)$/i.exec(data);
+  if (dataUrlMatch) {
+    if (!mimeType) mimeType = dataUrlMatch[1];
+    data = dataUrlMatch[2].trim();
+  }
+  if (!data) return null;
+  if (!mimeType.startsWith("image/")) mimeType = "image/png";
+
+  return { data, mimeType };
+};
+
+const extractProviderImage = (payload: unknown): ProviderImageResult => {
+  const data = payload as Record<string, unknown> | null;
+  const candidates = Array.isArray(data?.candidates) ? data.candidates : [];
+  const promptFeedbackBlockReason = String((data?.promptFeedback as Record<string, unknown> | undefined)?.blockReason || "");
+  const blockedByPrompt = isBlockedReason(promptFeedbackBlockReason);
+
+  let blockedByCandidates = candidates.length > 0;
+  for (const candidate of candidates) {
+    const finishReason = String((candidate as Record<string, unknown> | null)?.finishReason || "");
+    if (!isBlockedReason(finishReason)) blockedByCandidates = false;
+
+    const c = candidate as Record<string, unknown> | null;
+    const content = c?.content as Record<string, unknown> | undefined;
+    const directParts = Array.isArray(c?.parts) ? c.parts : [];
+    const contentParts = Array.isArray(content?.parts) ? content.parts : [];
+    const parts = [...contentParts, ...directParts];
+    for (const part of parts) {
+      const inline = extractInlineImage(part);
+      if (inline?.data) {
+        return {
+          imageData: inline.data,
+          mimeType: inline.mimeType,
+          blocked: blockedByPrompt || blockedByCandidates,
+        };
+      }
+    }
+  }
+
+  return {
+    imageData: "",
+    mimeType: "image/png",
+    blocked: blockedByPrompt || blockedByCandidates,
+  };
+};
+
 export async function POST(req: NextRequest) {
   let textAnswer = "", gamePrompt = "", style = "random";
   let roomCode = "", pid = "";
@@ -70,23 +149,24 @@ export async function POST(req: NextRequest) {
   const prompt = `Create a ${resolvedStyle} illustration that humorously captures this reaction:\n\nQuestion: "${gamePrompt}"\nPlayer's answer: "${textAnswer}"\n\nThe image should visually represent this answer as a funny, expressive response to the question. Make it relatable and comedic.`;
 
   try {
-    const res = await fetchWithRetry(
-      `https://generativelanguage.googleapis.com/v1beta/models/${IMAGE_MODEL}:generateContent`,
-      {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "x-goog-api-key": apiKey,
+    const requestImage = async (responseModalities: string[], promptText: string) =>
+      fetchWithRetry(
+        `https://generativelanguage.googleapis.com/v1beta/models/${IMAGE_MODEL}:generateContent`,
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "x-goog-api-key": apiKey,
+          },
+          body: JSON.stringify({
+            contents: [{ parts: [{ text: promptText }] }],
+            generationConfig: { responseModalities },
+          }),
         },
-        body: JSON.stringify({
-          contents: [{ parts: [{ text: prompt }] }],
-          generationConfig: { responseModalities: ["IMAGE", "TEXT"] },
-        }),
-      },
-      { attempts: 2, perAttemptTimeoutMs: IMAGE_TIMEOUT_MS, baseDelayMs: 400, maxDelayMs: 1500 }
-    );
+        { attempts: 2, perAttemptTimeoutMs: IMAGE_TIMEOUT_MS, baseDelayMs: 400, maxDelayMs: 1500 }
+      );
 
-    if (!res.ok) {
+    const mapProviderError = async (res: Response) => {
       let providerMsg = "";
       let providerStatus = "";
       try {
@@ -101,42 +181,47 @@ export async function POST(req: NextRequest) {
         providerStatus === "UNAUTHENTICATED" ||
         /api key|auth|permission/i.test(providerMsg)
       ) {
-        return NextResponse.json({ error: "invalid_key" }, { status: 401 });
+        return { error: "invalid_key", status: 401 };
       }
       if (res.status === 400) {
-        return NextResponse.json({ error: "provider_bad_request" }, { status: 400 });
+        return { error: "provider_bad_request", status: 400 };
       }
       if (res.status === 429 || res.status >= 500) {
-        return NextResponse.json({ error: "generation_busy" }, { status: 503 });
+        return { error: "generation_busy", status: 503 };
       }
-      return NextResponse.json({ error: "generation_failed" }, { status: 500 });
+      return { error: "generation_failed", status: 500 };
+    };
+
+    const firstRes = await requestImage(["IMAGE", "TEXT"], prompt);
+    if (!firstRes.ok) {
+      const mapped = await mapProviderError(firstRes);
+      return NextResponse.json({ error: mapped.error }, { status: mapped.status });
     }
 
-    const data = await res.json();
-    const candidates = Array.isArray(data?.candidates) ? data.candidates : [];
-    const promptFeedbackBlockReason = String(data?.promptFeedback?.blockReason || "").toUpperCase();
-    const blockedByPrompt = IMAGE_BLOCK_REASONS.has(promptFeedbackBlockReason);
-    const blockedByCandidates = candidates.length > 0 &&
-      candidates.every((c: { finishReason?: string }) =>
-        IMAGE_BLOCK_REASONS.has(String(c?.finishReason || "").toUpperCase())
-      );
-    if (blockedByPrompt || blockedByCandidates) {
+    const firstPayload = await firstRes.json();
+    let parsed = extractProviderImage(firstPayload);
+    if (parsed.blocked) {
       return NextResponse.json({ error: "generation_blocked" }, { status: 400 });
     }
 
-    let imageData = "";
-    let mimeType = "image/png";
-    for (const candidate of candidates) {
-      const parts = Array.isArray(candidate?.content?.parts) ? candidate.content.parts : [];
-      const imagePart = parts.find((p: { inlineData?: { mimeType?: string; data?: string } }) =>
-        p.inlineData?.mimeType?.startsWith("image/") && typeof p.inlineData?.data === "string"
-      );
-      if (!imagePart?.inlineData?.data) continue;
-      imageData = imagePart.inlineData.data;
-      mimeType = imagePart.inlineData.mimeType || mimeType;
-      break;
+    // Gemini occasionally returns text-only candidates with mixed modalities; one image-only retry
+    // recovers many of these responses without user-visible errors.
+    if (!parsed.imageData) {
+      const retryPrompt = `${prompt}\n\nReturn an image output for this request.`;
+      const secondRes = await requestImage(["IMAGE"], retryPrompt);
+      if (!secondRes.ok) {
+        const mapped = await mapProviderError(secondRes);
+        return NextResponse.json({ error: mapped.error }, { status: mapped.status });
+      }
+      const secondPayload = await secondRes.json();
+      parsed = extractProviderImage(secondPayload);
+      if (parsed.blocked) {
+        return NextResponse.json({ error: "generation_blocked" }, { status: 400 });
+      }
     }
 
+    const imageData = parsed.imageData;
+    const mimeType = parsed.mimeType || "image/png";
     if (!imageData) {
       return NextResponse.json({ error: "provider_no_image" }, { status: 502 });
     }

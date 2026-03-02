@@ -1,9 +1,10 @@
 import { Redis } from "@upstash/redis";
 import { NextRequest, NextResponse } from "next/server";
-import { checkIpRateLimit } from "@/lib/room-security";
+import { checkIpRateLimit, issueRoomPlayerToken } from "@/lib/room-security";
 
 const redis = Redis.fromEnv();
 const ROOM_TTL = 86400;
+const ROOM_CODE_RE = /^[A-Z0-9]{6}$/;
 
 // Atomic Lua script: reads room, enforces phase + capacity, appends player, re-saves.
 // Returns: ROOM_NOT_FOUND | NOT_IN_LOBBY | ALREADY_JOINED | ROOM_FULL | JOINED
@@ -53,7 +54,7 @@ export async function POST(req: NextRequest) {
   }
   const { code, pid, nickname } = body;
 
-  if (typeof code !== "string" || !code.trim()) {
+  if (typeof code !== "string" || !ROOM_CODE_RE.test(code.trim().toUpperCase())) {
     return NextResponse.json({ error: "invalid_code" }, { status: 400 });
   }
   if (typeof pid !== "string" || !pid.trim()) {
@@ -70,8 +71,10 @@ export async function POST(req: NextRequest) {
 
   switch (result) {
     case "JOINED":
-    case "ALREADY_JOINED":
-      return NextResponse.json({ ok: true, code: c });
+    case "ALREADY_JOINED": {
+      const token = await issueRoomPlayerToken(c, pid);
+      return NextResponse.json({ ok: true, code: c, token });
+    }
     case "ROOM_NOT_FOUND":
       return NextResponse.json({ error: "room_not_found" }, { status: 404 });
     case "NOT_IN_LOBBY":

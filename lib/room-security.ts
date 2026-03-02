@@ -22,6 +22,7 @@ export type RoomRateLimitResult = {
 
 const roomKey = (code: string) => `gifbattle:room:${code}`;
 const geminiKey = (code: string) => `gifbattle:gemini:${code}`;
+const roomPlayerTokenKey = (code: string, pid: string) => `gifbattle:ptoken:${code}:${pid}`;
 const rateKey = (bucket: RateBucket, code: string, scope: "minute" | "hour", window: number) =>
   `gifbattle:rl:${bucket}:${scope}:${code}:${window}`;
 
@@ -78,6 +79,37 @@ export async function upsertRoomGeminiKey(code: string, key: string): Promise<vo
     return;
   }
   await redis.set(geminiKey(c), trimmed, { ex: ROOM_TTL_SECS });
+}
+
+const makeRoomPlayerToken = () => `${crypto.randomUUID()}${crypto.randomUUID().replace(/-/g, "")}`;
+
+export async function issueRoomPlayerToken(code: string, pid: string): Promise<string> {
+  const c = normalizeCode(code);
+  const playerId = pid.trim();
+  if (!c || !playerId) return "";
+  const token = makeRoomPlayerToken();
+  await redis.set(roomPlayerTokenKey(c, playerId), token, { ex: ROOM_TTL_SECS });
+  return token;
+}
+
+export async function revokeRoomPlayerToken(code: string, pid: string): Promise<void> {
+  const c = normalizeCode(code);
+  const playerId = pid.trim();
+  if (!c || !playerId) return;
+  await redis.del(roomPlayerTokenKey(c, playerId));
+}
+
+export async function isValidRoomPlayerToken(
+  code: string,
+  pid: string,
+  token: string
+): Promise<boolean> {
+  const c = normalizeCode(code);
+  const playerId = pid.trim();
+  const presented = token.trim();
+  if (!c || !playerId || !presented) return false;
+  const stored = await redis.get(roomPlayerTokenKey(c, playerId));
+  return typeof stored === "string" && stored === presented;
 }
 
 const secondsUntilReset = (nowMs: number, windowMs: number) =>

@@ -3,6 +3,8 @@ import type { BrowserContext, Request, Route } from "@playwright/test";
 const STORE_PATH = "/api/store";
 const GEMINI_KEY_PATH = "/api/gemini-key";
 const CLEANUP_PATH = "/api/cleanup-images";
+const ROOM_STATE_PATH = "/api/room/state";
+const ROOM_LEAVE_PATH = "/api/room/leave";
 
 const json = async (route: Route, status: number, body: unknown) => {
   await route.fulfill({
@@ -66,7 +68,8 @@ const handleGeminiKeyRequest = async (route: Route, request: Request) => {
 const handleRoomCreateRequest = async (
   route: Route,
   request: Request,
-  store: Map<string, string>
+  store: Map<string, string>,
+  roomTokens: Map<string, string>
 ) => {
   if (request.method() !== "POST") return json(route, 405, { error: "method_not_allowed" });
   const body = request.postDataJSON() as { pid?: unknown; nickname?: unknown };
@@ -88,7 +91,9 @@ const handleRoomCreateRequest = async (
       namePromptRounds: 1, customPrompts: [],
     };
     store.set(key, JSON.stringify(roomState));
-    return json(route, 200, { code });
+    const token = `tok_${code}_${pid}`;
+    roomTokens.set(`${code}:${pid}`, token);
+    return json(route, 200, { code, token });
   }
   return json(route, 503, { error: "code_generation_failed" });
 };
@@ -96,7 +101,8 @@ const handleRoomCreateRequest = async (
 const handleRoomJoinRequest = async (
   route: Route,
   request: Request,
-  store: Map<string, string>
+  store: Map<string, string>,
+  roomTokens: Map<string, string>
 ) => {
   if (request.method() !== "POST") return json(route, 405, { error: "method_not_allowed" });
   const body = request.postDataJSON() as { code?: unknown; pid?: unknown; nickname?: unknown };
@@ -115,20 +121,106 @@ const handleRoomJoinRequest = async (
   if (room.phase !== "lobby") return json(route, 409, { error: "not_in_lobby" });
 
   const players = Array.isArray(room.players) ? room.players as Array<Record<string, unknown>> : [];
-  if (players.find((p) => p["id"] === pid)) return json(route, 200, { ok: true, code });
+  if (players.find((p) => p["id"] === pid)) {
+    const token = `tok_${code}_${pid}`;
+    roomTokens.set(`${code}:${pid}`, token);
+    return json(route, 200, { ok: true, code, token });
+  }
 
   if (players.length >= 12) return json(route, 409, { error: "room_full" });
 
   players.push({ id: pid, nickname, score: 0 });
   room.players = players;
   store.set(key, JSON.stringify(room));
-  return json(route, 200, { ok: true, code });
+  const token = `tok_${code}_${pid}`;
+  roomTokens.set(`${code}:${pid}`, token);
+  return json(route, 200, { ok: true, code, token });
+};
+
+const handleRoomStateRequest = async (
+  route: Route,
+  request: Request,
+  store: Map<string, string>,
+  roomTokens: Map<string, string>
+) => {
+  if (request.method() !== "POST") return json(route, 405, { error: "method_not_allowed" });
+  const body = request.postDataJSON() as {
+    code?: unknown;
+    pid?: unknown;
+    token?: unknown;
+    state?: unknown;
+  };
+  const code = typeof body?.code === "string" ? body.code.trim().toUpperCase() : "";
+  const pid = typeof body?.pid === "string" ? body.pid : "";
+  const token = typeof body?.token === "string" ? body.token : "";
+  const state = typeof body?.state === "string" ? body.state : "";
+  if (!code || !pid || !token || !state) return json(route, 400, { error: "invalid_request" });
+
+  if (roomTokens.get(`${code}:${pid}`) !== token) return json(route, 403, { error: "forbidden" });
+  const key = `gifbattle:room:${code}`;
+  const raw = store.get(key);
+  if (!raw) return json(route, 403, { error: "forbidden" });
+  let room: Record<string, unknown>;
+  try { room = JSON.parse(raw); } catch { return json(route, 403, { error: "forbidden" }); }
+  const players = Array.isArray(room.players) ? room.players as Array<Record<string, unknown>> : [];
+  if (!players.some((p) => p["id"] === pid)) return json(route, 403, { error: "forbidden" });
+
+  store.set(key, state);
+  return json(route, 200, { ok: true });
+};
+
+const handleRoomLeaveRequest = async (
+  route: Route,
+  request: Request,
+  store: Map<string, string>,
+  roomTokens: Map<string, string>
+) => {
+  if (request.method() !== "POST") return json(route, 405, { error: "method_not_allowed" });
+  const body = request.postDataJSON() as {
+    code?: unknown;
+    pid?: unknown;
+    token?: unknown;
+  };
+  const code = typeof body?.code === "string" ? body.code.trim().toUpperCase() : "";
+  const pid = typeof body?.pid === "string" ? body.pid : "";
+  const token = typeof body?.token === "string" ? body.token : "";
+  if (!code || !pid || !token) return json(route, 400, { error: "invalid_request" });
+
+  if (roomTokens.get(`${code}:${pid}`) !== token) return json(route, 403, { error: "forbidden" });
+  roomTokens.delete(`${code}:${pid}`);
+
+  const key = `gifbattle:room:${code}`;
+  const raw = store.get(key);
+  if (!raw) return json(route, 404, { error: "room_not_found" });
+  let room: Record<string, unknown>;
+  try { room = JSON.parse(raw); } catch { return json(route, 404, { error: "room_not_found" }); }
+
+  const players = Array.isArray(room.players) ? room.players as Array<Record<string, unknown>> : [];
+  const index = players.findIndex((p) => p["id"] === pid);
+  if (index < 0) return json(route, 200, { ok: true, alreadyLeft: true });
+
+  players.splice(index, 1);
+  if (players.length === 0) {
+    store.delete(key);
+    return json(route, 200, { ok: true, roomClosed: true });
+  }
+
+  const wasHost = room.host === pid;
+  room.players = players;
+  if (wasHost) room.host = players[0]?.["id"] || null;
+  store.set(key, JSON.stringify(room));
+  return json(route, 200, {
+    ok: true,
+    hostChanged: wasHost,
+    newHostId: wasHost ? room.host : null,
+  });
 };
 
 export const installGameApiMocks = async (
   context: BrowserContext,
   store: Map<string, string>
 ) => {
+  const roomTokens = new Map<string, string>();
   await context.route(`**${STORE_PATH}**`, (route, request) =>
     handleStoreRequest(route, request, store)
   );
@@ -139,9 +231,15 @@ export const installGameApiMocks = async (
     json(route, 200, { ok: true, deleted: 0 })
   );
   await context.route(`**/api/room/create**`, (route, request) =>
-    handleRoomCreateRequest(route, request, store)
+    handleRoomCreateRequest(route, request, store, roomTokens)
   );
   await context.route(`**/api/room/join**`, (route, request) =>
-    handleRoomJoinRequest(route, request, store)
+    handleRoomJoinRequest(route, request, store, roomTokens)
+  );
+  await context.route(`**${ROOM_STATE_PATH}**`, (route, request) =>
+    handleRoomStateRequest(route, request, store, roomTokens)
+  );
+  await context.route(`**${ROOM_LEAVE_PATH}**`, (route, request) =>
+    handleRoomLeaveRequest(route, request, store, roomTokens)
   );
 };
