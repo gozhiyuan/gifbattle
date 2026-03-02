@@ -1,7 +1,10 @@
 import { Redis } from "@upstash/redis";
 
 const redis = Redis.fromEnv();
-const ROOM_TTL_SECS = 86400;
+export const ACTIVE_ROOM_TTL_SECS = 4 * 60 * 60;
+export const LOBBY_ROOM_TTL_SECS = 1800;
+export const GAME_OVER_ROOM_TTL_SECS = 15 * 60;
+const CREDENTIAL_TTL_SECS = 86400;
 
 type RoomPlayer = { id: string; nickname?: string };
 
@@ -34,6 +37,9 @@ const RATE_LIMITS: Record<RateBucket, RateLimitConfig> = {
 const MINUTE_MS = 60 * 1000;
 const HOUR_MS = 60 * 60 * 1000;
 const VERCEL_BLOB_HOST_PATTERN = /(^|\.)public\.blob\.vercel-storage\.com$/i;
+const logRedisError = (op: string, details: Record<string, unknown>, error: unknown) => {
+  console.error(`room_security_${op}_failed`, { ...details, error });
+};
 
 const toRoomState = (raw: unknown): RoomState | null => {
   if (raw == null) return null;
@@ -52,8 +58,13 @@ const toRoomState = (raw: unknown): RoomState | null => {
 export async function getRoomState(code: string): Promise<RoomState | null> {
   const c = normalizeCode(code);
   if (!c) return null;
-  const raw = await redis.get(roomKey(c));
-  return toRoomState(raw);
+  try {
+    const raw = await redis.get(roomKey(c));
+    return toRoomState(raw);
+  } catch (error) {
+    logRedisError("get_room_state", { code: c }, error);
+    throw error;
+  }
 }
 
 export const isRoomPlayer = (room: RoomState | null, pid: string) =>
@@ -65,20 +76,30 @@ export const isRoomHost = (room: RoomState | null, pid: string) =>
 export async function getRoomGeminiKey(code: string): Promise<string> {
   const c = normalizeCode(code);
   if (!c) return "";
-  const raw = await redis.get(geminiKey(c));
-  if (typeof raw === "string") return raw;
-  return "";
+  try {
+    const raw = await redis.get(geminiKey(c));
+    if (typeof raw === "string") return raw;
+    return "";
+  } catch (error) {
+    logRedisError("get_room_gemini_key", { code: c }, error);
+    throw error;
+  }
 }
 
 export async function upsertRoomGeminiKey(code: string, key: string): Promise<void> {
   const c = normalizeCode(code);
   if (!c) return;
   const trimmed = key.trim();
-  if (!trimmed) {
-    await redis.del(geminiKey(c));
-    return;
+  try {
+    if (!trimmed) {
+      await redis.del(geminiKey(c));
+      return;
+    }
+    await redis.set(geminiKey(c), trimmed, { ex: CREDENTIAL_TTL_SECS });
+  } catch (error) {
+    logRedisError("upsert_room_gemini_key", { code: c, hasKey: Boolean(trimmed) }, error);
+    throw error;
   }
-  await redis.set(geminiKey(c), trimmed, { ex: ROOM_TTL_SECS });
 }
 
 const makeRoomPlayerToken = () => `${crypto.randomUUID()}${crypto.randomUUID().replace(/-/g, "")}`;
@@ -88,7 +109,12 @@ export async function issueRoomPlayerToken(code: string, pid: string): Promise<s
   const playerId = pid.trim();
   if (!c || !playerId) return "";
   const token = makeRoomPlayerToken();
-  await redis.set(roomPlayerTokenKey(c, playerId), token, { ex: ROOM_TTL_SECS });
+  try {
+    await redis.set(roomPlayerTokenKey(c, playerId), token, { ex: CREDENTIAL_TTL_SECS });
+  } catch (error) {
+    logRedisError("issue_room_player_token", { code: c, playerId }, error);
+    throw error;
+  }
   return token;
 }
 
@@ -96,7 +122,12 @@ export async function revokeRoomPlayerToken(code: string, pid: string): Promise<
   const c = normalizeCode(code);
   const playerId = pid.trim();
   if (!c || !playerId) return;
-  await redis.del(roomPlayerTokenKey(c, playerId));
+  try {
+    await redis.del(roomPlayerTokenKey(c, playerId));
+  } catch (error) {
+    logRedisError("revoke_room_player_token", { code: c, playerId }, error);
+    throw error;
+  }
 }
 
 export async function isValidRoomPlayerToken(
@@ -108,8 +139,13 @@ export async function isValidRoomPlayerToken(
   const playerId = pid.trim();
   const presented = token.trim();
   if (!c || !playerId || !presented) return false;
-  const stored = await redis.get(roomPlayerTokenKey(c, playerId));
-  return typeof stored === "string" && stored === presented;
+  try {
+    const stored = await redis.get(roomPlayerTokenKey(c, playerId));
+    return typeof stored === "string" && stored === presented;
+  } catch (error) {
+    logRedisError("is_valid_room_player_token", { code: c, playerId }, error);
+    throw error;
+  }
 }
 
 const secondsUntilReset = (nowMs: number, windowMs: number) =>
@@ -132,36 +168,41 @@ export async function checkRoomRateLimit(
   const c = normalizeCode(code);
   if (!c) return { allowed: false, retryAfterSec: 60, scope: "minute" };
 
-  const now = Date.now();
-  const cfg = RATE_LIMITS[bucket];
+  try {
+    const now = Date.now();
+    const cfg = RATE_LIMITS[bucket];
 
-  const minuteWindow = Math.floor(now / MINUTE_MS);
-  const minuteCount = await incrWithTtl(
-    rateKey(bucket, c, "minute", minuteWindow),
-    2 * 60
-  );
-  if (minuteCount > cfg.perMinute) {
-    return {
-      allowed: false,
-      retryAfterSec: secondsUntilReset(now, MINUTE_MS),
-      scope: "minute",
-    };
+    const minuteWindow = Math.floor(now / MINUTE_MS);
+    const minuteCount = await incrWithTtl(
+      rateKey(bucket, c, "minute", minuteWindow),
+      2 * 60
+    );
+    if (minuteCount > cfg.perMinute) {
+      return {
+        allowed: false,
+        retryAfterSec: secondsUntilReset(now, MINUTE_MS),
+        scope: "minute",
+      };
+    }
+
+    const hourWindow = Math.floor(now / HOUR_MS);
+    const hourCount = await incrWithTtl(
+      rateKey(bucket, c, "hour", hourWindow),
+      2 * 60 * 60
+    );
+    if (hourCount > cfg.perHour) {
+      return {
+        allowed: false,
+        retryAfterSec: secondsUntilReset(now, HOUR_MS),
+        scope: "hour",
+      };
+    }
+
+    return { allowed: true, retryAfterSec: 0, scope: null };
+  } catch (error) {
+    logRedisError("check_room_rate_limit", { code: c, bucket }, error);
+    return { allowed: false, retryAfterSec: 60, scope: "minute" };
   }
-
-  const hourWindow = Math.floor(now / HOUR_MS);
-  const hourCount = await incrWithTtl(
-    rateKey(bucket, c, "hour", hourWindow),
-    2 * 60 * 60
-  );
-  if (hourCount > cfg.perHour) {
-    return {
-      allowed: false,
-      retryAfterSec: secondsUntilReset(now, HOUR_MS),
-      scope: "hour",
-    };
-  }
-
-  return { allowed: true, retryAfterSec: 0, scope: null };
 }
 
 export const isManagedAiBlobUrl = (url: string): boolean => {
@@ -189,13 +230,18 @@ export async function checkIpRateLimit(
   action: "create" | "join",
   ip: string
 ): Promise<{ allowed: boolean; retryAfterSec: number }> {
-  const limits: Record<"create" | "join", number> = { create: 5, join: 30 };
-  const now = Date.now();
-  const window = Math.floor(now / MINUTE_MS);
-  const key = `gifbattle:rl:${action}:ip:${ip}:${window}`;
-  const count = await incrWithTtl(key, 2 * 60);
-  if (count > limits[action]) {
-    return { allowed: false, retryAfterSec: secondsUntilReset(now, MINUTE_MS) };
+  try {
+    const limits: Record<"create" | "join", number> = { create: 5, join: 30 };
+    const now = Date.now();
+    const window = Math.floor(now / MINUTE_MS);
+    const key = `gifbattle:rl:${action}:ip:${ip}:${window}`;
+    const count = await incrWithTtl(key, 2 * 60);
+    if (count > limits[action]) {
+      return { allowed: false, retryAfterSec: secondsUntilReset(now, MINUTE_MS) };
+    }
+    return { allowed: true, retryAfterSec: 0 };
+  } catch (error) {
+    logRedisError("check_ip_rate_limit", { action, ip }, error);
+    return { allowed: false, retryAfterSec: 60 };
   }
-  return { allowed: true, retryAfterSec: 0 };
 }

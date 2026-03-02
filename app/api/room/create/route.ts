@@ -1,9 +1,12 @@
 import { Redis } from "@upstash/redis";
 import { NextRequest, NextResponse } from "next/server";
-import { checkIpRateLimit, issueRoomPlayerToken } from "@/lib/room-security";
+import {
+  checkIpRateLimit,
+  issueRoomPlayerToken,
+  LOBBY_ROOM_TTL_SECS,
+} from "@/lib/room-security";
 
 const redis = Redis.fromEnv();
-const ROOM_TTL = 86400;
 const MAX_RETRIES = 5;
 
 const genCode = () => Math.random().toString(36).slice(2, 8).toUpperCase();
@@ -60,9 +63,25 @@ export async function POST(req: NextRequest) {
     };
 
     const key = `gifbattle:room:${code}`;
-    const result = await redis.set(key, JSON.stringify(roomState), { nx: true, ex: ROOM_TTL });
+    const result = await redis.set(key, JSON.stringify(roomState), {
+      nx: true,
+      ex: LOBBY_ROOM_TTL_SECS,
+    });
     if (result !== null) {
-      const token = await issueRoomPlayerToken(code, pid);
+      let token = "";
+      try {
+        token = await issueRoomPlayerToken(code, pid);
+      } catch (error) {
+        console.error("room_create_token_issue_failed", { code, pid, error });
+      }
+      if (!token) {
+        try {
+          await redis.del(key);
+        } catch (cleanupError) {
+          console.error("room_create_rollback_failed", { code, pid, cleanupError });
+        }
+        return NextResponse.json({ error: "token_issue_failed" }, { status: 503 });
+      }
       return NextResponse.json({ code, token });
     }
   }

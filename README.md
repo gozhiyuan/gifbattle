@@ -1,4 +1,4 @@
-# GIF Battle 🎭
+# GIF Battles <img src="app/favicon.ico" alt="GIF Battles favicon" width="32" height="32" />
 
 Multiplayer party game — players search for GIFs matching a prompt, then vote on the funniest one. Built with Next.js and hosted on Vercel.
 
@@ -10,6 +10,17 @@ Multiplayer party game — players search for GIFs matching a prompt, then vote 
 - Most points at the end wins
 
 Game state is stored in Upstash Redis and polled every 2 seconds, so all players stay in sync without WebSockets.
+
+### Gemini key note (before entering a room)
+
+- AI prompt/image features require a host-provided Gemini key for that room.
+- Get a key from [Google AI Studio](https://aistudio.google.com/app/apikey).
+- Keys are room-scoped, not shown to other players in UI, and cleared at game over.
+
+### Feedback and contributions
+
+- Questions or suggestions: open an issue at [github.com/gozhiyuan/gifbattle/issues](https://github.com/gozhiyuan/gifbattle/issues).
+- Code contributions are welcome via PRs at [github.com/gozhiyuan/gifbattle/pulls](https://github.com/gozhiyuan/gifbattle/pulls).
 
 ## Local development
 
@@ -111,7 +122,9 @@ tests/
 
 ### Data retention and deletion
 
-- Game room state (`gifbattle:room:*`) has a 24-hour TTL in Redis.
+- Lobby room state (`phase: lobby`) expires after 30 minutes of inactivity.
+- Active game room state (`phase: submitting/voting/round_results`) uses a 4-hour TTL.
+- Game-over room state (`phase: game_over`) uses a 15-minute TTL.
 - Vote and heartbeat keys (`gifbattle:vote:*`, `gifbattle:hb:*`) also use 24-hour TTL.
 - Room Gemini keys (`gifbattle:gemini:*`) are server-side only, cleared at game end by host, and expire after 24 hours if not cleared earlier.
 - AI image blobs are deleted at game-over via `/api/cleanup-images` (host-authenticated, room-scoped, best effort).
@@ -139,4 +152,4 @@ tests/
    - Record timeline, impacted rooms, and action items.
    - Tighten rate limits if usage spike bypassed expected thresholds.
 
-Room data expires automatically after 24 hours.
+Room lobby data expires in 30 minutes if the game is not started; active game data expires in 4 hours; game-over data expires in 15 minutes.

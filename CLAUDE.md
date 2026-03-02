@@ -1,4 +1,4 @@
-# GIF Battle — Claude Code Notes
+# GIF Battles — Claude Code Notes
 
 ## Stack
 
@@ -25,7 +25,7 @@
 
 ## Architecture notes
 
-The game uses a polling model (every 2s) — no WebSockets. All players read/write a single JSON blob per room stored under the key `gifbattle:room:<CODE>`. Vote records use separate keys `gifbattle:vote:<CODE>:<round>:<matchup>:<playerID>`. All keys expire after 24h. Room codes are 6 alphanumeric characters.
+The game uses a polling model (every 2s) — no WebSockets. All players read/write a single JSON blob per room stored under the key `gifbattle:room:<CODE>`. Vote records use separate keys `gifbattle:vote:<CODE>:<round>:<matchup>:<playerID>`. Lobby room keys expire in 30 minutes; active-game room keys expire in 4h; game-over room keys expire in 15m; vote keys expire in 24h. Room codes are 6 alphanumeric characters.
 
 The `storage` shim in `gif-battle.tsx` replaces the `window.storage` API from the Claude.ai sandbox:
 - `storage.get(key)` → `GET /api/store?key=...` → returns `{ value: string } | null`
