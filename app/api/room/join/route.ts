@@ -58,7 +58,7 @@ export async function POST(req: NextRequest) {
   if (typeof code !== "string" || !code.trim()) {
     return NextResponse.json({ error: "invalid_code" }, { status: 400 });
   }
-  if (typeof pid !== "string" || !pid) {
+  if (typeof pid !== "string" || !pid.trim()) {
     return NextResponse.json({ error: "invalid_pid" }, { status: 400 });
   }
   if (typeof nickname !== "string" || !nickname.trim()) {
