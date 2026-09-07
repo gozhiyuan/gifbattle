@@ -12,6 +12,7 @@
   "dependencies": {
     "@sentry/nextjs": "^10.41.0",
     "@upstash/redis": "^1.36.2",
+    "@vercel/analytics": "^2.0.1",
     "@vercel/blob": "^2.3.0",
     "next": "^14",
     "react": "^18",

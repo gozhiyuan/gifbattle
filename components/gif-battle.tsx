@@ -1305,6 +1305,10 @@ function HomeScreen({ nick, setNick, joinIn, setJoinIn, err, setErr, onCreate, o
           <a href="https://github.com/gozhiyuan/gifbattle/pulls" target="_blank" rel="noreferrer" style={{color:C.cyan,textDecoration:"underline"}}>
             PR
           </a>
+          {" · "}
+          <a href="/privacy" style={{color:C.cyan,textDecoration:"underline"}}>
+            Privacy
+          </a>
           .
         </div>
       </div>

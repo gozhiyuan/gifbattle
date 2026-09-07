@@ -135,6 +135,10 @@ tests/
 - Per-room rate limits apply to Gemini endpoints to reduce cost spikes (`image: 8/min, 120/hour`; `prompt: 18/min, 240/hour`).
 - Provider `400` errors are surfaced as config/model issues (not mislabeled as invalid key).
 
+### Web analytics
+
+Vercel Web Analytics is included through `@vercel/analytics` in the root layout. Enable Web Analytics for the project in the Vercel dashboard, then deploy to begin collecting anonymized visitor and page-view data. This project does not send custom game events.
+
 ### Data retention and deletion
 
 - Lobby room state (`phase: lobby`) expires after 30 minutes of inactivity.
