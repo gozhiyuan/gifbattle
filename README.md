@@ -122,12 +122,14 @@ tests/
 | `SENTRY_PROJECT` | Optional Sentry project slug for source map upload during build |
 | `SENTRY_AUTH_TOKEN` | Optional auth token for source map upload during build |
 | `BLOB_READ_WRITE_TOKEN` | Required for AI image upload to Vercel Blob (`/api/generate-image`) |
+| `GEMINI_IMAGE_MODEL` | Optional image model override: `gemini-3.1-flash-image` (default) or `gemini-3-pro-image` |
 
 ### LLM key behavior
 
 - GIF search always uses the app-level `NEXT_PUBLIC_GIPHY_KEY`.
+- GIF searches are sent directly from the player browser, but the app reserves a site-wide rolling 60-minute budget of 85 searches in Redis before each request. When that budget is exhausted, players are directed to the text/AI-answer fallback rather than receiving a GIPHY 429.
 - Prompt generation and AI image generation use a host-provided Gemini key (BYOK) configured in the lobby.
-- Prompt generation defaults to `gemini-2.5-flash`; image generation uses `gemini-2.5-flash-image`.
+- Prompt generation defaults to `gemini-3.5-flash` (with `gemini-3.6-flash` selectable by the host). Image generation uses `gemini-3.1-flash-image` by default.
 - The image generation route sets `maxDuration = 60` and can spend up to ~39s total across retries (3 x 12s attempts + backoff).
 - Gemini API calls use retry/backoff on transient `429`/`5xx` responses.
 - Per-room rate limits apply to Gemini endpoints to reduce cost spikes (`image: 8/min, 120/hour`; `prompt: 18/min, 240/hour`).

@@ -508,16 +508,49 @@ type Submission = {
 type GifSearchResult = {
   items: Array<{id:string,url:string,preview:string}>;
   error: string | null;
+  rateLimited?: boolean;
+  retryAfter?: number;
 };
 
-async function searchGifs(q, apiKey, offset = 0): Promise<GifSearchResult> {
+async function reserveGiphySearch(code: string, pid: string): Promise<{ error: string | null; retryAfter?: number }> {
+  try {
+    const r = await fetch("/api/giphy-search-budget", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ code, pid }),
+    });
+    if (r.status === 429) {
+      const data = await r.json().catch(() => null);
+      const retryAfter = Number(data?.retryAfter);
+      return {
+        error: "GIF search is taking a short break for everyone. Use Write Answer or create an AI image instead.",
+        retryAfter: Number.isFinite(retryAfter) ? retryAfter : 60,
+      };
+    }
+    if (!r.ok) return { error: "GIF search is temporarily unavailable. Use Write Answer or try again shortly." };
+    return { error: null };
+  } catch {
+    return { error: "GIF search is temporarily unavailable. Use Write Answer or try again shortly." };
+  }
+}
+
+async function searchGifs(q, apiKey, code: string, pid: string, offset = 0): Promise<GifSearchResult> {
   if (!q.trim() || !apiKey) return { items: [], error: null };
+  const permit = await reserveGiphySearch(code, pid);
+  if (permit.error) {
+    return { items: [], error: permit.error, rateLimited: true, retryAfter: permit.retryAfter };
+  }
   try {
     const r = await fetch(
       `https://api.giphy.com/v1/gifs/search?api_key=${apiKey}&q=${encodeURIComponent(q)}&limit=12&offset=${offset}&rating=pg-13`
     );
     if (r.status === 429) {
-      return { items: [], error: "Rate limit reached. Please wait a minute and try again." };
+      return {
+        items: [],
+        error: "GIPHY's shared free search limit was reached. Use Write Answer or create an AI image instead.",
+        rateLimited: true,
+        retryAfter: 60 * 60,
+      };
     }
     if (!r.ok) {
       return { items: [], error: "GIPHY search failed. Please try again." };
@@ -1348,8 +1381,8 @@ function Lobby({ gs, pid, code, isHost, startGame, leave, writeGs }) {
   const maskKey = (k: string) => k.length > 8 ? k.slice(0, 7) + "…" + k.slice(-4) : "••••••••";
 
   const GEMINI_MODELS = [
-    { id: "gemini-2.5-flash", label: "2.5 Flash" },
-    { id: "gemini-2.5-pro", label: "2.5 Pro" },
+    { id: "gemini-3.5-flash", label: "3.5 Flash" },
+    { id: "gemini-3.6-flash", label: "3.6 Flash" },
   ];
   const modelIds = new Set(GEMINI_MODELS.map(m => m.id));
   const currentModel = modelIds.has(gs.geminiModel) ? gs.geminiModel : GEMINI_MODELS[0].id;
@@ -1762,6 +1795,7 @@ function Submit({ gs, pid, code, apiKey, writeGs, fetchGs, transitioning, transi
   const [sel, setSel] = useState<{id:string,url:string,preview:string}|null>(null);
   const [searching, setSearching] = useState(false);
   const [searchErr, setSearchErr] = useState("");
+  const [giphyPauseUntil, setGiphyPauseUntil] = useState(0);
   const searchQ = useRef<ReturnType<typeof setTimeout>|null>(null);
   const [activeTab, setActiveTab] = useState<"giphy"|"write">(apiKey ? "giphy" : "write");
   const [textStyle, setTextStyle] = useState("random");
@@ -1771,8 +1805,6 @@ function Submit({ gs, pid, code, apiKey, writeGs, fetchGs, transitioning, transi
   const [genSlow, setGenSlow] = useState(false);
   const genSlowRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   useEffect(() => () => { clearTimeout(genSlowRef.current!); }, []);
-  const scrollRef = useRef<HTMLDivElement>(null);
-  const sentinelRef = useRef<HTMLDivElement>(null);
   const timerRef = useRef<ReturnType<typeof setInterval>|null>(null);
   const advanced = useRef(false);
 
@@ -1815,13 +1847,20 @@ function Submit({ gs, pid, code, apiKey, writeGs, fetchGs, transitioning, transi
   }, [apiKey, activeTab]);
 
   const doSearch = async (q: string) => {
+    if (giphyPauseUntil > Date.now()) {
+      setSearchErr("GIF search is taking a short break for everyone. Use Write Answer or create an AI image instead.");
+      return;
+    }
     setGifs([]);
     setOffset(0);
     setHasMore(false);
     setSearching(true);
     setSearchErr("");
-    const { items, error } = await searchGifs(q, apiKey, 0);
-    if (error) setSearchErr(error);
+    const { items, error, rateLimited, retryAfter } = await searchGifs(q, apiKey, code, pid, 0);
+    if (error) {
+      setSearchErr(error);
+      if (rateLimited) setGiphyPauseUntil(Date.now() + Math.max(60, retryAfter || 60) * 1000);
+    }
     else if (!items.length) setSearchErr("No results — try different keywords");
     setGifs(items);
     setHasMore(items.length === 12);
@@ -1829,35 +1868,26 @@ function Submit({ gs, pid, code, apiKey, writeGs, fetchGs, transitioning, transi
   };
 
   const loadMore = useCallback(async () => {
-    if (searching || !hasMore || !query.trim()) return;
+    if (searching || !hasMore || !query.trim() || offset >= 12) return;
+    if (giphyPauseUntil > Date.now()) {
+      setSearchErr("GIF search is taking a short break for everyone. Use Write Answer or create an AI image instead.");
+      return;
+    }
     const newOffset = offset + 12;
     setSearching(true);
-    const { items, error } = await searchGifs(query, apiKey, newOffset);
+    const { items, error, rateLimited, retryAfter } = await searchGifs(query, apiKey, code, pid, newOffset);
     if (error) {
       setSearchErr(error);
+      if (rateLimited) setGiphyPauseUntil(Date.now() + Math.max(60, retryAfter || 60) * 1000);
       setHasMore(false);
       setSearching(false);
       return;
     }
     setGifs(prev => [...prev, ...items]);
     setOffset(newOffset);
-    setHasMore(items.length === 12);
+    setHasMore(false);
     setSearching(false);
-  }, [searching, hasMore, offset, query, apiKey]);
-
-  const loadMoreRef = useRef(loadMore);
-  useEffect(() => { loadMoreRef.current = loadMore; }, [loadMore]);
-
-  // Infinite scroll via IntersectionObserver on the sentinel element
-  useEffect(() => {
-    if (!sentinelRef.current || !scrollRef.current || !hasMore || searching) return;
-    const observer = new IntersectionObserver(
-      (entries) => { if (entries[0].isIntersecting) loadMoreRef.current(); },
-      { root: scrollRef.current, threshold: 0.1 }
-    );
-    observer.observe(sentinelRef.current);
-    return () => observer.disconnect();
-  }, [hasMore, searching, gifs.length]);
+  }, [searching, hasMore, offset, query, apiKey, code, pid, giphyPauseUntil]);
 
   const STYLES = [
     { key: "random", label: "🎲 Random" },
@@ -2061,7 +2091,7 @@ function Submit({ gs, pid, code, apiKey, writeGs, fetchGs, transitioning, transi
         {activeTab === "giphy" && (
           <>
             {gifs.length > 0 && (
-              <div ref={scrollRef} style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:6,maxHeight:300,overflowY:"auto",marginBottom:12}}>
+              <div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:6,maxHeight:300,overflowY:"auto",marginBottom:12}}>
                 {gifs.map(gif => (
                   <div key={gif.id} onClick={() => setSel(gif)}
                     style={{position:"relative",paddingBottom:"100%",borderRadius:8,overflow:"hidden",cursor:"pointer",
@@ -2073,13 +2103,16 @@ function Submit({ gs, pid, code, apiKey, writeGs, fetchGs, transitioning, transi
                     </div>
                   </div>
                 ))}
-                {hasMore && !searching && (
-                  <div ref={sentinelRef} style={{height:20,gridColumn:"1 / -1"}}/>
-                )}
               </div>
             )}
             {searching && <div style={g.info}>Searching…</div>}
             {searchErr && !searching && <div style={g.err}>⚠ {searchErr}</div>}
+            {hasMore && !searching && !searchErr && (
+              <button className="gbtn" onClick={loadMore}
+                style={{...g.btnSm,width:"100%",marginBottom:12,background:C.card2,color:C.text,border:`1px solid ${C.muted}44`}}>
+                Show 12 more GIFs
+              </button>
+            )}
             <PoweredByGiphy/>
             {sel && (
               <div style={{textAlign:"center",marginBottom:12}}>

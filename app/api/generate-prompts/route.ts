@@ -9,14 +9,10 @@ import { fetchWithRetry } from "@/lib/gemini-retry";
 
 export const maxDuration = 30;
 
-const DEFAULT_MODEL = "gemini-2.5-flash";
+const DEFAULT_MODEL = "gemini-3.5-flash";
 const ALLOWED_MODELS = new Set([
-  "gemini-2.5-flash",
-  "gemini-2.5-pro",
-  // Graceful fallback for stale room config values from older builds.
-  "gemini-2.0-flash-exp",
-  "gemini-1.5-flash",
-  "gemini-1.5-pro",
+  "gemini-3.5-flash",
+  "gemini-3.6-flash",
 ]);
 
 const sanitizePrompt = (value: unknown): string => {

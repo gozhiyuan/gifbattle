@@ -23,6 +23,11 @@ export type RoomRateLimitResult = {
   scope: "minute" | "hour" | null;
 };
 
+export type GiphySearchBudgetResult = {
+  allowed: boolean;
+  retryAfterSec: number;
+};
+
 const roomKey = (code: string) => `gifbattle:room:${code}`;
 const geminiKey = (code: string) => `gifbattle:gemini:${code}`;
 const roomPlayerTokenKey = (code: string, pid: string) => `gifbattle:ptoken:${code}:${pid}`;
@@ -34,6 +39,10 @@ const RATE_LIMITS: Record<RateBucket, RateLimitConfig> = {
   image: { perMinute: 8, perHour: 120 },
   prompt: { perMinute: 18, perHour: 240 },
 };
+// Keep some headroom below GIPHY's 100-search beta-key limit so users see a
+// helpful fallback instead of a provider 429. This is deliberately site-wide:
+// all rooms share the deployment's public GIPHY key.
+export const GIPHY_SEARCH_HOURLY_BUDGET = 85;
 const MINUTE_MS = 60 * 1000;
 const HOUR_MS = 60 * 60 * 1000;
 const VERCEL_BLOB_HOST_PATTERN = /(^|\.)public\.blob\.vercel-storage\.com$/i;
@@ -202,6 +211,42 @@ export async function checkRoomRateLimit(
   } catch (error) {
     logRedisError("check_room_rate_limit", { code: c, bucket }, error);
     return { allowed: false, retryAfterSec: 60, scope: "minute" };
+  }
+}
+
+export async function checkGiphySearchBudget(): Promise<GiphySearchBudgetResult> {
+  try {
+    const now = Date.now();
+    const key = "gifbattle:rl:giphy:global";
+    const result = await redis.eval<[number, number, number, string], [number, number]>(
+      `
+        redis.call("ZREMRANGEBYSCORE", KEYS[1], "-inf", ARGV[1])
+        local count = redis.call("ZCARD", KEYS[1])
+        if count >= tonumber(ARGV[3]) then
+          local oldest = redis.call("ZRANGE", KEYS[1], 0, 0, "WITHSCORES")
+          return {0, tonumber(oldest[2])}
+        end
+        redis.call("ZADD", KEYS[1], ARGV[2], ARGV[4])
+        redis.call("EXPIRE", KEYS[1], 3700)
+        return {1, 0}
+      `,
+      [key],
+      [now - HOUR_MS, now, GIPHY_SEARCH_HOURLY_BUDGET, crypto.randomUUID()]
+    );
+    if (Number(result[0]) === 1) return { allowed: true, retryAfterSec: 0 };
+
+    const oldestRequestAt = Number(result[1]);
+    return {
+      allowed: false,
+      retryAfterSec: Number.isFinite(oldestRequestAt)
+        ? Math.max(1, Math.ceil((oldestRequestAt + HOUR_MS - now) / 1000))
+        : 60,
+    };
+  } catch (error) {
+    logRedisError("check_giphy_search_budget", {}, error);
+    // Fail closed: an unavailable guard must not turn into a burst of direct
+    // GIPHY calls that exhaust the shared key.
+    return { allowed: false, retryAfterSec: 60 };
   }
 }
 

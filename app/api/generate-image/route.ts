@@ -22,7 +22,15 @@ const STYLE_PROMPTS: Record<string, string> = {
 };
 
 const STYLE_KEYS = Object.keys(STYLE_PROMPTS);
-const IMAGE_MODEL = "gemini-2.5-flash-image";
+const DEFAULT_IMAGE_MODEL = "gemini-3.1-flash-image";
+const ALLOWED_IMAGE_MODELS = new Set([
+  "gemini-3.1-flash-image",
+  "gemini-3-pro-image",
+]);
+const configuredImageModel = process.env.GEMINI_IMAGE_MODEL || DEFAULT_IMAGE_MODEL;
+const IMAGE_MODEL = ALLOWED_IMAGE_MODELS.has(configuredImageModel)
+  ? configuredImageModel
+  : DEFAULT_IMAGE_MODEL;
 const IMAGE_TIMEOUT_MS = 25000;
 const IMAGE_BLOCK_REASONS = new Set([
   "SAFETY",
