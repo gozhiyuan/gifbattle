@@ -10,6 +10,7 @@ import { MediaCredit } from "./media-credit";
 import { safeHttps } from "@/lib/media/catalog-schema.cjs";
 
 import { hostGraceMs, heartbeatIsFresh } from "@/lib/host-presence";
+import { getRoomToken, setRoomToken, clearRoomToken } from "@/lib/room-token";
 import { ANSWER_MODE_POLICY, CHOICE_MODE_POLICY, getAnswerMode, modeForCycle, answerModeLabels, isChoiceMode, submissionAllowedForQuestion } from "@/lib/answer-modes";
 import { MediaResult, RemoteProvider, ProviderError } from "@/lib/media/types";
 import { enabledProviders, primaryProvider, providerLabels } from "@/lib/media/provider-config";
@@ -455,7 +456,6 @@ const buildMatchupsFromEligible = (eligible: string[]) => {
 const PID_STORAGE_KEY = "gifbattle_pid";
 const NICK_STORAGE_KEY = "gifbattle_nick";
 const LAST_ROOM_STORAGE_KEY = "gifbattle_last_room";
-const ROOM_TOKEN_KEY_PREFIX = "gifbattle_room_token:";
 const getStablePid = () => {
   if (typeof window === "undefined") return Math.random().toString(36).slice(2, 10);
   try {
@@ -473,19 +473,6 @@ const TAB_ID = getStablePid();
 const rKey = c => `gifbattle:room:${c}`;
 const vKey = (c, round, mi, pid) => `gifbattle:vote:${c}:${round}:${mi}:${pid}`;
 const hbKey = c => `gifbattle:hb:${c}`;
-const roomTokenKey = (code: string) => `${ROOM_TOKEN_KEY_PREFIX}${code}`;
-const getRoomToken = (code: string) => {
-  if (!code) return "";
-  try { return localStorage.getItem(roomTokenKey(code)) || ""; } catch { return ""; }
-};
-const setRoomToken = (code: string, token: string) => {
-  if (!code) return;
-  try { localStorage.setItem(roomTokenKey(code), token || ""); } catch {}
-};
-const clearRoomToken = (code: string) => {
-  if (!code) return;
-  try { localStorage.removeItem(roomTokenKey(code)); } catch {}
-};
 
 // ── KV storage shim — calls /api/store instead of window.storage ──────────────
 const storage = {
@@ -795,7 +782,7 @@ export default function App() {
         fetch("/api/gemini-key", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ code: roomCode, pid, key: "" }),
+          body: JSON.stringify({ code: roomCode, pid, token: getRoomToken(roomCode), key: "" }),
         })
       );
       cleanupState.base = true;
@@ -811,7 +798,7 @@ export default function App() {
           fetch("/api/cleanup-images", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ code: roomCode, pid, urls: blobUrls }),
+            body: JSON.stringify({ code: roomCode, pid, token: getRoomToken(roomCode), urls: blobUrls }),
           })
         );
       }
@@ -1342,7 +1329,7 @@ function Lobby({ gs, pid, code, isHost, startGame, leave, writeGs }) {
     setGeminiKey(saved);
     setKeyInput(saved);
     if (!isHost) return;
-    fetch(`/api/gemini-key?code=${encodeURIComponent(code)}&pid=${encodeURIComponent(pid)}`)
+    fetch(`/api/gemini-key?code=${encodeURIComponent(code)}&pid=${encodeURIComponent(pid)}`, { headers: { "x-room-token": getRoomToken(code) } })
       .then(r => r.ok ? r.json() : null)
       .then(data => setRoomKeySet(Boolean(data?.exists)))
       .catch(() => {});
@@ -1358,7 +1345,7 @@ function Lobby({ gs, pid, code, isHost, startGame, leave, writeGs }) {
       const res = await fetch("/api/gemini-key", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ code, pid, key: k }),
+        body: JSON.stringify({ code, pid, token: getRoomToken(code), key: k }),
       });
       const data = await res.json();
       if (!res.ok || data?.error) {
@@ -1380,7 +1367,7 @@ function Lobby({ gs, pid, code, isHost, startGame, leave, writeGs }) {
       await fetch("/api/gemini-key", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ code, pid, key: "" }),
+        body: JSON.stringify({ code, pid, token: getRoomToken(code), key: "" }),
       });
     } catch {}
     setRoomKeySet(false);
@@ -1465,7 +1452,7 @@ function Lobby({ gs, pid, code, isHost, startGame, leave, writeGs }) {
       const res = await fetch("/api/generate-prompts", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ existingPrompts: promptSeeds, roomCode: code, pid, model: currentModel }),
+        body: JSON.stringify({ existingPrompts: promptSeeds, roomCode: code, pid, token: getRoomToken(code), model: currentModel }),
       });
       const data = await res.json();
       if (data.error === "not configured") {
@@ -1835,7 +1822,7 @@ function Submit({ gs, pid, code, apiKey, writeGs, fetchGs, transitioning, transi
   const [roomAiReady, setRoomAiReady] = useState<boolean | null>(null);
   useEffect(() => {
     const controller = new AbortController();
-    fetch(`/api/gemini-key?code=${encodeURIComponent(code)}&pid=${encodeURIComponent(pid)}`, { signal: controller.signal })
+    fetch(`/api/gemini-key?code=${encodeURIComponent(code)}&pid=${encodeURIComponent(pid)}`, { signal: controller.signal, headers: { "x-room-token": getRoomToken(code) } })
       .then(response => response.ok ? response.json() : null)
       .then(data => { if (!controller.signal.aborted) setRoomAiReady(Boolean(data?.exists)); })
       .catch(() => { if (!controller.signal.aborted) setRoomAiReady(false); });
@@ -2572,12 +2559,12 @@ function GameOver({ gs, writeGs, pid, runEndGameCleanup }) {
   useEffect(() => {
     if (pid !== gs.host) return;
     void fetch("/api/gif-events", { method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ code: gs.code, pid, provider: primaryProvider, event: "game_completed" }), keepalive: true }).catch(() => {});
+      body: JSON.stringify({ code: gs.code, pid, token: getRoomToken(gs.code), provider: primaryProvider, event: "game_completed" }), keepalive: true }).catch(() => {});
     try { sessionStorage.removeItem("gifbattle_gemini_key"); } catch {}
     fetch("/api/gemini-key", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ code: gs.code, pid, key: "" }),
+      body: JSON.stringify({ code: gs.code, pid, token: getRoomToken(gs.code), key: "" }),
     }).catch(() => {});
   }, [gs.code, gs.host, pid]);
   const plan = getRoundPlan(gs);

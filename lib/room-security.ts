@@ -173,6 +173,22 @@ export async function isValidRoomPlayerToken(
   }
 }
 
+// Player IDs are visible to anyone holding the room code (room state is readable via /api/store),
+// so a pid alone never proves identity. Routes that act for a player must also check the secret
+// token issued at create/join. Returns the room when authorized, otherwise null.
+export async function authorizeRoomPlayer(
+  code: string,
+  pid: unknown,
+  token: unknown,
+  opts: { host?: boolean } = {}
+): Promise<RoomState | null> {
+  if (typeof pid !== "string" || !pid || typeof token !== "string" || !token || token.length > 200) return null;
+  const room = await getRoomState(code);
+  if (!(opts.host ? isRoomHost(room, pid) : isRoomPlayer(room, pid))) return null;
+  if (!(await isValidRoomPlayerToken(code, pid, token))) return null;
+  return room;
+}
+
 const secondsUntilReset = (nowMs: number, windowMs: number) =>
   Math.max(1, Math.ceil((windowMs - (nowMs % windowMs)) / 1000));
 

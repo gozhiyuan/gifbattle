@@ -55,10 +55,21 @@ const handleStoreRequest = async (
   return json(route, 405, { error: "method_not_allowed" });
 };
 
-const handleGeminiKeyRequest = async (route: Route, request: Request) => {
-  if (request.method() === "GET") return json(route, 200, { exists: false });
+// Mirrors authorizeRoomPlayer: a pid is not enough, the request must carry that player's room token.
+const hasRoomToken = (roomTokens: Map<string, string>, code: unknown, pid: unknown, token: unknown) =>
+  typeof code === "string" && typeof pid === "string" && typeof token === "string" && !!token &&
+  roomTokens.get(`${code.trim().toUpperCase()}:${pid}`) === token;
+
+const handleGeminiKeyRequest = async (route: Route, request: Request, roomTokens: Map<string, string>) => {
+  if (request.method() === "GET") {
+    const url = new URL(request.url());
+    const token = request.headers()["x-room-token"];
+    if (!hasRoomToken(roomTokens, url.searchParams.get("code"), url.searchParams.get("pid"), token)) return json(route, 403, { error: "forbidden" });
+    return json(route, 200, { exists: false });
+  }
   if (request.method() === "POST") {
-    const raw = request.postDataJSON() as { key?: unknown };
+    const raw = request.postDataJSON() as { key?: unknown; code?: unknown; pid?: unknown; token?: unknown };
+    if (!hasRoomToken(roomTokens, raw?.code, raw?.pid, raw?.token)) return json(route, 403, { error: "forbidden" });
     const key = typeof raw?.key === "string" ? raw.key.trim() : "";
     return json(route, 200, { ok: true, exists: Boolean(key) });
   }
@@ -226,7 +237,7 @@ export const installGameApiMocks = async (
     handleStoreRequest(route, request, store)
   );
   await context.route(`**${GEMINI_KEY_PATH}**`, (route, request) =>
-    handleGeminiKeyRequest(route, request)
+    handleGeminiKeyRequest(route, request, roomTokens)
   );
   await context.route(`**${CLEANUP_PATH}**`, (route) =>
     json(route, 200, { ok: true, deleted: 0 })
