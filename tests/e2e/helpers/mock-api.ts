@@ -1,5 +1,6 @@
 import type { BrowserContext, Request, Route } from "@playwright/test";
 import { voteKey, voteRejection } from "../../../lib/votes";
+import { isValidPlayerId } from "../../../lib/player-id";
 
 const STORE_PATH = "/api/store";
 const GEMINI_KEY_PATH = "/api/gemini-key";
@@ -80,7 +81,8 @@ const handleRoomCreateRequest = async (
   const body = request.postDataJSON() as { pid?: unknown; nickname?: unknown };
   const pid = typeof body?.pid === "string" ? body.pid : "";
   const nickname = typeof body?.nickname === "string" ? body.nickname.trim() : "";
-  if (!nickname || !pid) return json(route, 400, { error: "invalid_input" });
+  if (!isValidPlayerId(pid)) return json(route, 400, { error: "invalid_pid" });
+  if (!nickname) return json(route, 400, { error: "invalid_input" });
 
   for (let i = 0; i < 5; i++) {
     const code = Math.random().toString(36).slice(2, 8).toUpperCase();
@@ -114,7 +116,8 @@ const handleRoomJoinRequest = async (
   const code = typeof body?.code === "string" ? body.code.trim().toUpperCase() : "";
   const pid = typeof body?.pid === "string" ? body.pid : "";
   const nickname = typeof body?.nickname === "string" ? body.nickname.trim() : "";
-  if (!code || !pid || !nickname) return json(route, 400, { error: "invalid_input" });
+  if (!isValidPlayerId(pid)) return json(route, 400, { error: "invalid_pid" });
+  if (!code || !nickname) return json(route, 400, { error: "invalid_input" });
 
   const key = `gifbattle:room:${code}`;
   const raw = store.get(key);

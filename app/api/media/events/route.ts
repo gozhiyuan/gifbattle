@@ -3,6 +3,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { Redis } from '@upstash/redis';
 import { getRoomState, isRoomPlayer, isValidRoomPlayerToken, checkRoomRateLimit } from '@/lib/room-security';
 import { getCatalog } from '@/lib/media/catalog-server';
+import { voteKey } from '@/lib/votes';
 import { stockEventAssets } from '@/lib/media/stock-metrics';
 const redis = Redis.fromEnv();
 
@@ -21,7 +22,7 @@ export async function POST(request: NextRequest) {
     if (!(await checkRoomRateLimit(body.code, 'media-event')).allowed) return NextResponse.json({ error: 'rate_limited' }, { status: 429 });
     const ids=new Set((await getCatalog()).catalog.assets.map(a=>a.id));
     if(body.assetIds.some(id=>!ids.has(id)))return NextResponse.json({error:'invalid_request'},{status:400});
-    const vote = body.event === 'voted' ? await redis.get<string>(`gifbattle:vote:${body.code}:${body.roundIndex}:${body.matchup}:${body.pid}`) : undefined;
+    const vote = body.event === 'voted' ? await redis.get<string>(voteKey(body.code, body.gameId, body.roundIndex, body.matchup, body.pid)) : undefined;
     const assets = stockEventAssets(room, body.pid, body.roundIndex, body.matchup, body.event, body.assetIds, vote);
     for (const asset of new Set(assets)) {
       const identity = createHash('sha256').update(`${body.code}:${body.gameId}:${body.pid}:${body.roundIndex}:${['vote_exposed', 'voted'].includes(body.event) ? body.matchup : ''}:${asset}:${body.event}`).digest('hex');

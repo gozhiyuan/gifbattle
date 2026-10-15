@@ -3,6 +3,7 @@ import { NextRequest, NextResponse } from "next/server";
 import {
   checkIpRateLimit,
   issueRoomPlayerToken,
+  isValidPlayerId,
   isValidRoomPlayerToken,
   LOBBY_ROOM_TTL_SECS,
 } from "@/lib/room-security";
@@ -62,7 +63,7 @@ export async function POST(req: NextRequest) {
   if (typeof code !== "string" || !ROOM_CODE_RE.test(code.trim().toUpperCase())) {
     return NextResponse.json({ error: "invalid_code" }, { status: 400 });
   }
-  if (typeof pid !== "string" || !pid.trim()) {
+  if (!isValidPlayerId(pid)) {
     return NextResponse.json({ error: "invalid_pid" }, { status: 400 });
   }
   if (typeof nickname !== "string" || !nickname.trim()) {

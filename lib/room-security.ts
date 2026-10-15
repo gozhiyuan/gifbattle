@@ -1,4 +1,7 @@
 import { Redis } from "@upstash/redis";
+import { isValidPlayerId } from "./player-id";
+
+export { isValidPlayerId };
 
 const redis = Redis.fromEnv();
 export const ACTIVE_ROOM_TTL_SECS = 4 * 60 * 60;
@@ -132,7 +135,7 @@ const makeRoomPlayerToken = () => `${crypto.randomUUID()}${crypto.randomUUID().r
 
 export async function issueRoomPlayerToken(code: string, pid: string): Promise<string> {
   const c = normalizeCode(code);
-  const playerId = pid.trim();
+  const playerId = isValidPlayerId(pid) ? pid : "";
   if (!c || !playerId) return "";
   const token = makeRoomPlayerToken();
   try {
@@ -146,7 +149,7 @@ export async function issueRoomPlayerToken(code: string, pid: string): Promise<s
 
 export async function revokeRoomPlayerToken(code: string, pid: string): Promise<void> {
   const c = normalizeCode(code);
-  const playerId = pid.trim();
+  const playerId = isValidPlayerId(pid) ? pid : "";
   if (!c || !playerId) return;
   try {
     await redis.del(roomPlayerTokenKey(c, playerId));
@@ -162,7 +165,7 @@ export async function isValidRoomPlayerToken(
   token: string
 ): Promise<boolean> {
   const c = normalizeCode(code);
-  const playerId = pid.trim();
+  const playerId = isValidPlayerId(pid) ? pid : "";
   const presented = token.trim();
   if (!c || !playerId || !presented) return false;
   try {
@@ -183,7 +186,7 @@ export async function authorizeRoomPlayer(
   token: unknown,
   opts: { host?: boolean } = {}
 ): Promise<RoomState | null> {
-  if (typeof pid !== "string" || !pid || typeof token !== "string" || !token || token.length > 200) return null;
+  if (!isValidPlayerId(pid) || typeof token !== "string" || !token || token.length > 200) return null;
   const room = await getRoomState(code);
   if (!(opts.host ? isRoomHost(room, pid) : isRoomPlayer(room, pid))) return null;
   if (!(await isValidRoomPlayerToken(code, pid, token))) return null;

@@ -57,5 +57,9 @@ test("rejoining under an existing player ID needs that player's token", async ({
   // The host's ID is readable from room state; knowing it must not yield a token
   expect(await attempt({ code, pid: host, nickname: "Imposter" })).toMatchObject({ status: 409, body: { error: "already_joined" } });
   expect(await attempt({ code, pid: host, nickname: "Imposter", token: "guessed" })).toMatchObject({ status: 409 });
+  // Look-alike IDs must not alias to the host (the server used to trim IDs when issuing tokens)
+  for (const lookalike of [` ${host}`, `${host} `, `${host}\n`]) {
+    expect(await attempt({ code, pid: lookalike, nickname: "Imposter" })).toMatchObject({ status: 400, body: { error: "invalid_pid" } });
+  }
   expect(await attempt({ code, pid: host, nickname: "Host", token })).toMatchObject({ status: 200, body: { token } });
 });
