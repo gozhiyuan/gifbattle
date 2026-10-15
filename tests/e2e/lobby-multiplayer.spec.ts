@@ -100,7 +100,7 @@ test("lobby shows a notification when a player leaves", async ({ browser }) => {
   await expect(guestPage.getByRole("button", { name: /create room/i })).toBeVisible();
 
   await expect(hostPage.getByText("PLAYERS (1/12)")).toBeVisible({ timeout: 10000 });
-  await expect(hostPage.getByRole("status")).toContainText(/guest left the lobby/i);
+  await expect(hostPage.getByRole("status").filter({ hasText: /guest left the lobby/i })).toBeVisible();
 
   await hostContext.close();
   await guestContext.close();
@@ -139,7 +139,7 @@ test("host leaving during game reassigns host and notifies players", async ({ br
   await hostPage.getByRole("button", { name: "← Leave" }).click();
   await expect(hostPage.getByRole("button", { name: /create room/i })).toBeVisible();
 
-  await expect(guestPage.getByRole("status")).toContainText(/is now host/i, { timeout: 10000 });
+  await expect(guestPage.getByRole("status").filter({ hasText: /is now host/i })).toBeVisible({ timeout: 10000 });
 
   const key = `gifbattle:room:${roomCode}`;
   const raw = store.get(key);

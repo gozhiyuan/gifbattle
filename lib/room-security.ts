@@ -13,6 +13,7 @@ type RoomPlayer = { id: string; nickname?: string };
 
 export type RoomState = {
   geminiModel?: string;
+  questionTopics?: string[];
   phase?: string;
   submitDeadline?: number;
   prompts?: string[];

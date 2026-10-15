@@ -12,6 +12,7 @@ import { safeHttps } from "@/lib/media/catalog-schema.cjs";
 import { hostGraceMs, heartbeatIsFresh } from "@/lib/host-presence";
 import { getRoomToken, setRoomToken, clearRoomToken } from "@/lib/room-token";
 import { buildPromptsForPlan, promptIdentity } from "@/lib/game-prompts";
+import { QUESTIONS, QUESTION_TOPICS, normalizeQuestionTopics, questionsForTopics } from "@/lib/questions";
 import { voteKey } from "@/lib/votes";
 import { ANSWER_MODE_POLICY, CHOICE_MODE_POLICY, getAnswerMode, modeForCycle, answerModeLabels, isChoiceMode, submissionAllowedForQuestion } from "@/lib/answer-modes";
 import { MediaResult, RemoteProvider, ProviderError } from "@/lib/media/types";
@@ -26,271 +27,6 @@ const SUBMIT_SECS = 60;      // seconds per GIF question (total = SUBMIT_SECS * 
 const RESULTS_SECS = 5;      // seconds to show round results before auto-advancing
 const NOTICE_MS = 5000;
 
-const PROMPTS = [
-  "When you realize it's Monday tomorrow",
-  "Me explaining my life choices to my parents",
-  "When the WiFi suddenly cuts out",
-  "That moment when you see your ex in public",
-  "When someone says 'we need to talk'",
-  "Me trying to adult",
-  "When the food finally arrives",
-  "My reaction when someone spoils the ending",
-  "Finding $20 in old pants",
-  "How I feel every Friday afternoon",
-  "Me pretending to work on Zoom",
-  "When someone asks if I'm really okay",
-  "After sending a risky text",
-  "Me after one cup of coffee",
-  "How I walk into the weekend",
-  "When someone takes the last slice of pizza",
-  "When someone says 'just a quick question'",
-  "Me on a diet vs. smelling pizza",
-  "When the meeting could've been an email",
-  "My face during awkward silences",
-  "Me trying to explain my sense of humor",
-  "When autocorrect betrays me",
-  "Me five minutes before a deadline",
-  "When the plan actually works",
-  "How I look vs. how I feel",
-  "Me opening my bank app after brunch",
-  "That moment the group chat goes silent",
-  "When my package says delivered but isn't",
-  "Me acting normal after tripping in public",
-  "When your camera turns on unexpectedly",
-  "Me hearing my own voice in a recording",
-  "When someone replies 'k' to a paragraph",
-  "Me checking if the door is locked again",
-  "When the elevator stops on every floor",
-  "Me trying to fold a fitted sheet",
-  "When the playlist ruins your gym momentum",
-  "Me pretending I know wine flavors",
-  "When the password needs one more symbol",
-  "Me joining a call exactly on time",
-  "When your pet judges all your decisions",
-  "Me reading terms and conditions like",
-  "When someone starts clapping on airplane landing",
-  "Me trying to remember why I entered",
-  "When a recipe says 'prep 10 minutes'",
-  "Me after saying 'one more episode'",
-  "When your alarm rings from a dream",
-  "Me trying to take a group selfie",
-  "When your phone battery hits one percent",
-  "Me seeing my old tweets resurface",
-  "When someone says 'this won't hurt'",
-  "Me discovering autocorrect changed my boss message",
-  "When the QR menu won't load",
-  "Me pretending the spicy food is fine",
-  "When your coffee order is wrong again",
-  "Me in winter before the shower",
-  "When someone takes forever at the ATM",
-  "Me opening LinkedIn after one bad day",
-  "When the app asks for another update",
-  "Me trying to stay awake after lunch",
-  "When your food arrives and no utensils",
-  "Me hearing 'let's go around and share'",
-  "When your joke doesn't land at all",
-  "Me searching symptoms at two a.m.",
-  "When my cart total doubles at checkout",
-  "Me trying to assemble IKEA furniture",
-  "When your ride share is two minutes away",
-  "Me accidentally liking a post from 2018",
-  "When someone says 'be yourself' in interviews",
-  "Me when the waiter says 'enjoy'",
-  "When your sock gets wet unexpectedly",
-  "Me trying to parallel park under pressure",
-  "When the fire alarm tests during nap",
-  "Me introducing two friends with same name",
-  "When your boss says 'quick sync?'",
-  "Me watching someone type with one finger",
-  "When the chip bag is mostly air",
-  "Me pretending I understand crypto",
-  "When your text says delivered not read",
-  "Me preparing to cancel a free trial",
-  "When the printer starts making new noises",
-  "Me trying to leave without saying goodbye",
-  "When your mom starts with 'no offense'",
-  "Me hearing footsteps behind me at night",
-  "When the weather app lies again",
-  "Me opening the fridge repeatedly for ideas",
-  "When someone takes credit for team work",
-  "Me trying to avoid eye contact salespeople",
-  "When your airport gate changes last minute",
-  "Me finding a typo after sending",
-  "When your phone autocorrects your own name",
-  "Me trying to remember where I parked",
-  "When your laptop fan sounds like takeoff",
-  "Me answering unknown numbers by mistake",
-  "When someone says 'trust me' nervously",
-  "Me realizing I forgot my headphones",
-  "When you wave back at no one",
-  "Me checking if that email sounded rude",
-  "When the waiter asks 'sparkling or still?'",
-  "Me trying to split the bill evenly",
-  "When your friend says they're five minutes away",
-  "Me holding in a sneeze in silence",
-  "When your screen share shows wrong tab",
-  "Me trying to carry every grocery bag",
-  "When your smartwatch says 'time to stand'",
-  "Me reading old messages and cringing",
-  "When my haircut looked better at salon",
-  "Me waiting for microwave at one second",
-  "When your package needs a signature",
-  "Me trying to meditate but thinking groceries",
-  "When your dad discovers voice notes",
-  "Me opening fifteen tabs to compare one item",
-  "When your train arrives already full",
-  "Me trying to leave bed in winter",
-  "When your contact lens disappears mid-blink",
-  "Me saying 'on my way' from home",
-  "When someone forwards an email chain novel",
-  "Me pretending to know where north is",
-  "When your photos app reminds old memories",
-  "Me trying not to laugh in serious meeting",
-  "When your landlord says 'easy fix'",
-  "Me starting healthy on Monday again",
-  "When the restroom has hand dryer tornado",
-  "Me choosing a profile picture for an hour",
-  "When someone tags you in unflattering photo",
-  "Me hearing my name in another conversation",
-  "When your to-do list adds itself",
-  "Me finding one fry at bottom of bag",
-  "When someone eats your labeled office lunch",
-  "Me trying to stay calm on hold",
-  "When your coffee spills right after brewing",
-  "Me pretending the buffering wheel is fine",
-  "That moment when you send to wrong chat",
-  "When your umbrella flips inside out",
-  "Me refreshing tracking updates every hour",
-  "When your keyboard suddenly types in caps",
-  "That moment when your password finally works",
-  "Me deciding what to watch for 40 minutes",
-  "When your call drops at the important part",
-  "Me trying to pronounce menu items confidently",
-  "That moment when your shoelace breaks outside",
-  "When your online order misses one item",
-  "Me turning the pillow to the cold side",
-  "That moment when the ice cream falls",
-  "When your friend says bring cash only",
-  "Me pretending I saw the movie too",
-  "That moment when your tab closes itself",
-  "When your charger only works at one angle",
-  "Me trying not to cry during onions",
-  "That moment when your joke gets explained",
-  "When your playlist repeats the same song",
-  "Me reading recipe comments before cooking",
-  "That moment when your phone falls face down",
-  "When the cashier says card machine down",
-  "Me acting calm during software updates",
-  "That moment when the calendar alert jumpscare",
-  "When your socks don't match but too late",
-  "Me trying to open a childproof cap",
-  "That moment when you forget your own number",
-  "When your camera mirrors you unexpectedly",
-  "Me checking weather then ignoring it",
-  "That moment when your seat reclines into snacks",
-  "When your food delivery takes a scenic route",
-  "Me overthinking a one-word reply",
-  "That moment when the autocorrect wins again",
-  "When your landlord schedules surprise inspection",
-  "Me searching for a file I renamed",
-  "That moment when your laptop updates at shutdown",
-  "When your online meeting starts with silence",
-  "Me trying to look busy near manager",
-  "That moment when your package gets rerouted",
-  "When your haircut reveals ears you forgot",
-  "Me opening fridge like it changed",
-  "That moment when everyone says let's split",
-  "When your friend spoils the surprise accidentally",
-  "Me trying to carry coffee and keys",
-  "That moment when the app logs you out",
-  "When your socks vanish in laundry",
-  "Me nodding like I understand finance",
-  "That moment when your phone rings in quiet room",
-  "When your GPS says turn then recalculates",
-  "Me pretending I can hear in loud bar",
-  "That moment when your alarm is PM",
-  "When your hand slips opening soda",
-  "Me trying to write an out-of-office",
-  "That moment when your pet steals your seat",
-  "When your stream quality drops during finale",
-  "Me realizing I muted myself five minutes",
-  "That moment when the elevator mirror humbles you",
-  "When your card gets declined and then works",
-  "Me responding all to company email by mistake",
-  "That moment when your bag zipper breaks",
-  "When your tiny typo changes the meaning",
-  "Me trying to stay awake in webinar",
-  "That moment when your ride says arriving now",
-  "When your shoes squeak in a quiet hallway",
-  "Me ignoring low storage warnings until panic",
-  "That moment when your pen leaks in pocket",
-  "When your neighbor starts drilling on Sunday",
-  "Me pretending to enjoy networking events",
-  "That moment when your desk snack is gone",
-  "When your friend says don't be mad",
-  "Me opening map app just for confidence",
-  "That moment when your email bounces back",
-  "When your pizza arrives with no ranch",
-  "Me trying to look natural in candid photo",
-  "That moment when your room key stops working",
-  "When your train platform changes at last second",
-  "Me trying to understand parking signs",
-  "That moment when your call is on speaker",
-  "When your tea gets cold twice",
-  "Me pretending to remember everyone's names",
-  "That moment when your groceries bag rips",
-  "When your browser has 67 open tabs",
-  "Me trying to keep plants alive",
-  "That moment when your timer was never started",
-  "When your sink dishes multiply overnight",
-  "Me saying yes then checking calendar",
-  "That moment when your old playlist slaps",
-  "When your phone brightness goes full sun",
-  "Me looking for sunglasses already on head",
-  "That moment when your boss replies instantly",
-  "When your app asks to enable notifications again",
-  "Me trying to open a sticky jar",
-  "That moment when your party outfit is too much",
-  "When your table order goes to wrong seat",
-  "Me calculating tip under pressure",
-  "That moment when your roast goes too far",
-  "When your headphone battery dies at gym",
-  "Me waiting for typo correction in text bubble",
-  "That moment when your code works unexpectedly",
-  "When your microwave beeps like emergency alarm",
-  "Me trying not to laugh during serious email",
-  "That moment when your calendar double-books itself",
-  "When your raincoat leaks anyway",
-  "Me opening camera accidentally with flashlight on",
-  "That moment when your food is too hot",
-  "When your browser autofills old address",
-  "Me trying to stay chill in customer support queue",
-  "That moment when your alarm snooze becomes an hour",
-  "When your friend asks for your Netflix password",
-  "Me reading one-star reviews for fun",
-  "That moment when your jeans stop fitting",
-  "When your tiny scratch sounds catastrophic",
-  "Me trying to remember where I set my phone",
-  "That moment when your lunch reheats unevenly",
-  "When your alarm and dream sync perfectly",
-  "Me pretending I didn't see the typo",
-  "That moment when your weekend disappears instantly",
-  "When your hoodie string escapes forever",
-  "Me trying to choose one snack at store",
-  "That moment when your printer works first try",
-  "When your notes app saves your chaos",
-  "Me checking lock screen every two minutes",
-  "That moment when your group photo has eyes closed",
-  "When your tiny task takes all day",
-  "Me trying to leave voice note in public",
-  "That moment when your checkout line stops moving",
-  "When your friend says this will be quick",
-  "Me staring at loading bar for motivation",
-  "That moment when your AC sounds haunted",
-  "When your smoothie separates instantly",
-  "Me trying to be productive on Friday afternoon",
-  "That moment when your app crashes before submit",
-];
 
 const getRounds = (state?: { rounds?: number }) => Math.max(1, Number(state?.rounds) || DEFAULT_ROUNDS);
 const getNamePromptRounds = (state) => {
@@ -981,7 +717,8 @@ export default function App() {
     const rounds = getRounds(fresh);
     const namePromptRounds = getNamePromptRounds(fresh);
     const customPromptPool = (fresh.customPrompts || []) as string[];
-    const pool = [...PROMPTS, ...customPromptPool];
+    const selectedQuestions = questionsForTopics(fresh.questionTopics);
+    const pool = [...selectedQuestions.map(question => question.text), ...customPromptPool];
     if (pool.length === 0) return alert("No prompts available");
     const maxC = fresh.maxCompetitors ?? 4;
     const players = (fresh.players || []) as Array<{ id: string; nickname: string }>;
@@ -991,15 +728,17 @@ export default function App() {
     const previousPrompts: string[] = Array.isArray(fresh.usedPrompts) && fresh.usedPrompts.length > 0
       ? (fresh.usedPrompts as string[])
       : (Array.isArray(fresh.prompts) ? (fresh.prompts as string[]) : []);
-    const prompts = buildPromptsForPlan(
+    let prompts: string[];
+    try { prompts = buildPromptsForPlan(
       pool,
       plan,
       rounds,
       namePromptRounds,
       playerNameById,
       customPromptPool,
-      previousPrompts
-    );
+      previousPrompts,
+      selectedQuestions.filter(question => question.featured).map(question => question.text)
+    ); } catch (error) { return alert(error instanceof Error ? error.message : "Choose more topics or fewer rounds."); }
     await writeGs({
       ...fresh, phase:"submitting", prompts, submissions:{}, doneSubmitting:[], votingRound:0,
       matchups:[], currentMatchup:0, roundMatchupWins:{}, voteDeadline:null, usedPrompts: prompts, roundPlan:plan, answerModePolicy: fresh.alternateModes === false ? CHOICE_MODE_POLICY : ANSWER_MODE_POLICY, alternateModes: fresh.alternateModes !== false, answerModeOverrides: {},
@@ -1309,6 +1048,22 @@ function Lobby({ gs, pid, code, isHost, startGame, leave, writeGs }) {
     .filter(n => n >= 0 && n <= rounds)
     .sort((a, b) => a - b);
   const customPrompts: string[] = gs.customPrompts || [];
+  const [topicsSaving, setTopicsSaving] = useState(false);
+  const [topicsError, setTopicsError] = useState('');
+  const selectedTopics = normalizeQuestionTopics(gs.questionTopics);
+  const availableQuestions = questionsForTopics(selectedTopics);
+  const neededQuestions = Math.max(0, rounds - namePromptRounds) * heatsPerRound;
+  const availablePromptCount = new Set([...availableQuestions.map(question => question.text), ...customPrompts].map(promptIdentity)).size;
+  const insufficientQuestions = availablePromptCount < neededQuestions;
+  const saveTopics = async (topics: string[]) => {
+    if (!isHost || topicsSaving) return;
+    setTopicsSaving(true); setTopicsError('');
+    try {
+      if (!await writeGs({ ...gs, questionTopics: normalizeQuestionTopics(topics) })) setTopicsError('Could not save question topics. Please retry.');
+    } catch { setTopicsError('Could not save question topics. Please retry.'); }
+    finally { setTopicsSaving(false); }
+  };
+
 
   const setMaxComp = async (n: number) => {
     if (!isHost) return;
@@ -1485,6 +1240,24 @@ function Lobby({ gs, pid, code, isHost, startGame, leave, writeGs }) {
                 <input type="checkbox" checked={alternateDraft} disabled={alternateSaving} onChange={event => void saveAlternateMode(event.target.checked)}/>{' '}Alternate GIF and Meme rounds
               </label> : <div style={{fontSize:13,marginBottom:8}}>Answer format: {gs.alternateModes !== false ? 'Alternating GIF and Meme rounds' : 'Players choose GIF or Meme'}</div>}
               <div style={{fontSize:12,color:C.muted,marginBottom:12}}>{gs.alternateModes !== false ? 'On: rounds alternate GIF → Meme, with one required mode per question.' : 'Off: players choose Search GIFs or Create Meme for every question.'}</div>
+              <fieldset disabled={!isHost || topicsSaving} style={{border:0,padding:0,margin:'0 0 16px',minWidth:0}}>
+                <legend style={{fontSize:11,color:C.muted,letterSpacing:2,marginBottom:8}}>QUESTION TOPICS</legend>
+                <div style={{display:'flex',flexWrap:'wrap',gap:6}}>
+                  <button type="button" aria-pressed={selectedTopics.length === 0} onClick={() => void saveTopics([])}
+                    style={{...g.btnSm,background:selectedTopics.length === 0 ? C.text : C.card,color:selectedTopics.length === 0 ? C.bg : C.text}}>All topics</button>
+                  {QUESTION_TOPICS.map(topic => {
+                    const selected = selectedTopics.includes(topic.id);
+                    return <button type="button" key={topic.id} aria-pressed={selected} onClick={() => void saveTopics(selected ? selectedTopics.filter(id => id !== topic.id) : [...selectedTopics,topic.id])}
+                      style={{...g.btnSm,background:selected ? C.text : C.card,color:selected ? C.bg : C.text}}>{topic.label}</button>;
+                  })}
+                </div>
+              </fieldset>
+              <div role="status" style={{fontSize:12,color:C.muted,marginBottom:12}}>
+                {availableQuestions.length} questions · {availableQuestions.filter(question => question.featured).length} featured. {selectedTopics.length ? selectedTopics.map(id => QUESTION_TOPICS.find(topic => topic.id === id)?.label).join(', ') : 'All topics'}.
+                {' '}Featured questions appear more often. Custom questions and player-name rounds are included separately.
+              </div>
+              {topicsError && <div role="alert" style={g.err}>{topicsError}</div>}
+              {insufficientQuestions && <div role="alert" style={g.err}>Choose more question topics or fewer rounds to avoid repeats.</div>}
               {settingRow("ROUNDS", "", [3,5,7,10], rounds, setRounds)}
               {settingRow("NAME-BASED ROUNDS", "", nameRoundOptions, namePromptRounds, setNamePromptRounds)}
               {settingRow("ANSWERS PER HEAT", "", [2,4,6,8], maxC, setMaxComp)}
@@ -1506,7 +1279,7 @@ function Lobby({ gs, pid, code, isHost, startGame, leave, writeGs }) {
                 {`${vSecs}s per matchup`}
               </div>
               <div style={{fontSize:12,color:C.muted,marginTop:8}}>
-                {`${PROMPTS.length} built-in questions + ${customPrompts.length} custom`}
+                {`${availableQuestions.length} matching questions (${QUESTIONS.length} total) + ${customPrompts.length} custom`}
               </div>
             </div>
           );
@@ -1682,7 +1455,7 @@ function Lobby({ gs, pid, code, isHost, startGame, leave, writeGs }) {
         <div style={{marginTop:16}}>
           {gs.players.length === 2 && <div role="status" style={g.info}>Two-player showcase: voting is skipped and each answer earns 1 point. Add a third player for voting.</div>}
           {isHost
-            ?<button className="gbtn" style={{...g.btn,...g.btnP}} disabled={alternateSaving} onClick={startGame}>{alternateSaving ? "Saving settings…" : gs.players.length<2?"⏳ Need more players…":"🚀 Start Game"}</button>
+            ?<button className="gbtn" style={{...g.btn,...g.btnP}} disabled={alternateSaving || topicsSaving || insufficientQuestions} onClick={startGame}>{alternateSaving || topicsSaving ? "Saving settings…" : gs.players.length<2?"⏳ Need more players…":"🚀 Start Game"}</button>
             :<div style={{textAlign:"center",color:C.muted,padding:12,background:C.card2,borderRadius:10,marginBottom:10,border:`1px solid ${C.muted}22`}}>⏳ Waiting for host to start…</div>}
           <button className="gbtn" style={{...g.btn,...g.btnS,marginBottom:0}} onClick={leave}>← Leave</button>
         </div>
