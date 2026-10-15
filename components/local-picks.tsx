@@ -1,12 +1,13 @@
 'use client';
 import { useEffect, useState, useRef, CSSProperties, ReactNode } from 'react';
-import { localProvider } from '@/lib/media/providers/local';
+import { localProvider, CatalogChangedError } from '@/lib/media/providers/local';
 import { STOCK_CATEGORIES } from '@/lib/media/stock-categories.cjs';
 import { PAGE_SIZE } from '@/lib/media/provider-config';
 import { MediaResult } from '@/lib/media/types';
 import { MediaCredit } from './media-credit';
 
-export function LocalPicks({ onSubmit, colors, styles, captionableOnly = false, renderSelection, onExposure, onUnavailable, searchQuery, onSelect, selectedId, disabled = false }: {
+export function LocalPicks({ onSubmit, colors, styles, captionableOnly = false, renderSelection, onExposure, onUnavailable, searchQuery, onSelect, selectedId, disabled = false, seed = 'browse' }: {
+  seed?: string;
   searchQuery?: string; onSelect?: (item: MediaResult) => void; selectedId?: string; disabled?: boolean;
   onSubmit: (item: MediaResult) => Promise<void>;
   captionableOnly?: boolean;
@@ -18,7 +19,7 @@ export function LocalPicks({ onSubmit, colors, styles, captionableOnly = false, 
 }) {
   const [internalQuery, setQuery] = useState('');
   const query = searchQuery ?? internalQuery;
-  useEffect(() => { setCursor(undefined); }, [searchQuery]);
+  useEffect(() => { setCursor(undefined); }, [searchQuery, seed]);
   const [category, setCategory] = useState('');
   const [cursor, setCursor] = useState<string | undefined>();
   const [nextCursor, setNextCursor] = useState<string | undefined>();
@@ -57,7 +58,7 @@ export function LocalPicks({ onSubmit, colors, styles, captionableOnly = false, 
     if (!cursor) setItems([]);
     const timer = setTimeout(() => {
       localProvider.search({ query, category, captionable: captionableOnly, pageSize: PAGE_SIZE, cursor,
-        customerId: '', signal: controller.signal }).then(result => {
+        customerId: '', seed, signal: controller.signal }).then(result => {
         if (controller.signal.aborted) return;
         setItems(previous => cursor ? [...previous, ...result.items] : result.items); setNextCursor(result.nextCursor);
         if (!query && !category && !cursor && !result.items.length && unavailable.current && !fallbackRequested.current) {
@@ -65,11 +66,12 @@ export function LocalPicks({ onSubmit, colors, styles, captionableOnly = false, 
           void unavailable.current().catch(() => { fallbackRequested.current = false; setError('Could not enable written answers. Please retry.'); });
         }
       }).catch(error => {
+        if(!controller.signal.aborted && error instanceof CatalogChangedError && cursor){setCursor(undefined);setItems([]);setNextCursor(undefined);return;}
         if (!controller.signal.aborted) setError(error.message || 'Templates are unavailable. Please try again.');
       }).finally(() => { if (!controller.signal.aborted) setLoading(false); });
     }, 200);
     return () => { clearTimeout(timer); controller.abort(); };
-  }, [category, query, cursor, captionableOnly]);
+  }, [category, query, cursor, captionableOnly, seed]);
   const choose = (value: string) => { setCategory(value); setCursor(undefined); };
   return <div>
     {searchQuery === undefined && <input style={styles.inp} placeholder={captionableOnly ? "Search meme templates" : "Search Our Picks"} value={query}

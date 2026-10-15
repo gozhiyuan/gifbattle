@@ -1,3 +1,4 @@
+import {catalogPath} from './catalog-store.mjs';
 import { createHash } from 'node:crypto';
 import sharp from 'sharp';
 import { readFile, writeFile, mkdir, rename } from 'node:fs/promises';
@@ -164,7 +165,7 @@ export async function batchCommand(command, options, workspace) {
   const path = resolve(workspace, options.input || options.out || 'media-work/stock-diverse/candidates.json');
   let data, failure;
   if (command === 'batch-collect') {
-    const catalog = JSON.parse(await readFile(resolve(workspace, 'public/media/catalog.json'), 'utf8'));
+    const catalog = JSON.parse(await readFile(catalogPath(workspace), 'utf8'));
     data = await collectBatch({ path, perCategory: Number(options['per-category'] || 50), sources: (options.sources || 'commons').split(','), maxRequests: Number(options['max-requests'] || 120), exclude: [...catalog.assets, ...await loadExclusions(workspace)], retrySources: options['retry-sources'] === 'true', grow: options.grow === 'true' });
   } else {
     data = JSON.parse(await readFile(path, 'utf8'));
@@ -182,7 +183,7 @@ export async function batchCommand(command, options, workspace) {
     } else {
       const limit = Number(options.limit || 50);
       if (!Number.isInteger(limit) || limit < 1 || limit > 1000) throw new Error('Use import limit 1–1000');
-      const catalog = JSON.parse(await readFile(resolve(workspace, 'public/media/catalog.json'), 'utf8'));
+      const catalog = JSON.parse(await readFile(catalogPath(workspace), 'utf8'));
       const existing = new Set(catalog.assets.map(asset => asset.id));
       const approved = data.candidates.filter(c => c.reviewStatus === 'approved' && !existing.has(c.id)).slice(0, limit);
       validateCatalog({ version: 1, assets: approved.map(reviewedMetadata) });

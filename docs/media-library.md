@@ -4,8 +4,8 @@ One catalog backs reaction images/animations now and captionable meme templates.
 
 ## Storage and credentials
 
-- **Start with static storage.** Prepared files and previews live in `public/media/`; the versioned manifest is `public/media/catalog.json`. Commit these and redeploy. Next/Vercel serves the files. No new account, API key, database or storage bill is required for this path beyond normal hosting usage.
-- **For a bigger library, use existing Vercel Blob.** Set `BLOB_READ_WRITE_TOKEN` and pass `--storage blob`. Files use the `stock/` prefix, separate from temporary room AI images. The manifest remains committed; Blob URLs replace `/media/...` URLs. Public Blob files can be fetched by the app and later loaded for Canvas captioning (configure/check cross-origin behavior when building the meme editor). Storage and bandwidth follow your Blob plan.
+- **Local tests:** `public/media/catalog.json` and two small cat WebP files are a test fixture only. Static imports are for local experiments. Growing inventory lives in ignored `media-work/catalog.json`, outside GitHub.
+- **Production uses existing Vercel Blob:** set `MEDIA_CATALOG_SOURCE=blob`, `BLOB_READ_WRITE_TOKEN`, and the existing Upstash Redis credentials. Images/previews use `stock/`; immutable catalog snapshots use `stock/catalog/<sha256>.json`. Redis stores a small current-version pointer and retained revision pointers. Blob imports and shortlist publication sync the live catalog after uploads finish; no asset commit or redeployment is required. Storage and bandwidth follow your Blob plan.
 - **Pexels search:** set `PEXELS_API_KEY` in `.env.local`, from https://www.pexels.com/api/. This is an offline curator credential, never a `NEXT_PUBLIC_` variable. The script loads `.env.local` automatically. It searches photos only; no video-to-GIF extraction in this release.
 - **Wikimedia Commons search:** no key required. It returns source-specific license metadata, not an assurance that every result is usable. GIF/JPEG/PNG/WebP candidates are supported.
 - **Original/AI/other licensed files:** use `localFile`. No sourcing API needed. Use the AI generation command below or your own originals, and retain their provenance.
@@ -60,7 +60,7 @@ The importer validates all approval metadata and duplicate IDs before downloadin
 
 Imports never silently replace an existing asset ID. Use a new version ID to replace a file. If an import fails after some writes, those files are unpublished orphans; remove them before retrying (including any `stock/` Blob objects). Do not run two imports concurrently. Blob upload is an external write; the CLI does it only when explicitly invoked with `--storage blob`.
 
-Static validation checks referenced local files exist. External Blob availability isn't checked by this command; verify URLs in a playtest. Build/deploy is required for either storage mode because the catalog is versioned with the app. Existing room image cleanup does not delete permanent stock.
+Validation checks referenced local files exist; use a playtest to verify external Blob availability. Blob publication becomes visible to new browsing requests within about 15 seconds on healthy instances. Existing room image cleanup does not delete permanent stock.
 
 ## 4. Playtest
 
@@ -83,7 +83,18 @@ A daily Vercel job is configured in `vercel.json` for `/api/cleanup-memes`. Add 
 
 Memes remain available through voting and results. The HTML results export embeds fetched temporary images so a successful export can still display them after deletion. Export before Play Again; failed image fetches fall back to URLs and cannot guarantee later availability. Local development does not run Vercel cron automatically.
 
-The catalog remains a versioned JSON file on the server; assets may be stored in Blob. It supports thousands of records without sending every record to the browser, but edits still require a redeploy. A database/admin workflow can follow when catalog updates need to happen independently of deployments.
+The catalog is loaded server-side from immutable Blob snapshots, with a 15-second pointer cache and a last-good snapshot fallback for up to five minutes during an outage. The browser receives only one page. Browse ties use a stable player/game/question seed; keyword relevance still ranks first. Page cursors pin the revision, seed and filters. Old revisions remain addressable for seven days after replacement; expired cursors restart browsing while preserving the caption draft. No production fallback to bundled stock is allowed.
+
+```sh
+# Once, migrate an existing local catalog (including local seed files) to Blob:
+npm run media -- catalog-migrate
+# Fresh curator checkout: pull the current inventory before adding assets:
+npm run media -- catalog-pull
+# Retry a failed publication without downloading/scoring again:
+npm run media -- catalog-sync
+```
+
+Publication validates safe approved Blob URLs, uploads a checksummed manifest, then atomically swaps the Redis pointer. Concurrent or stale publishers cannot overwrite a newer pointer; accidental removal of existing IDs is rejected. Reviewed removals require editing the local working catalog and explicitly running `catalog-sync --allow-removals true`. Immutable snapshots remain in Blob; manage old-snapshot retention separately from game image cleanup. Keep one archive publisher running at a time. `catalog-pull` replaces working metadata, so back up unpublished edits before pulling.
 
 
 ## AI suggestions and offline preparation
@@ -130,7 +141,7 @@ npm run media -- import --input media-work/approved.json --storage blob
 npm run media -- validate
 ```
 
-Use `--offset` with the returned `nextOffset` to page review/export. Approving alone does not publish: export, import and redeploy the catalog. Exported memes are captioned reaction images (`captionable: false`) with original licensing and the player's consent recorded. Rejection deletes the copied Blob before removing the queue entry; failure leaves the entry for retry. A minimal rejection tombstone prevents resubmitting the same upload. Removing an already published asset also requires removing its catalog entry and stock files. Pending copies remain until you review/reject them; monitor this queue and Blob usage. Approval/export copies can be retained as provenance.
+Use `--offset` with the returned `nextOffset` to page review/export. Approving alone does not publish: export, then import with `--storage blob` to sync the live catalog. Exported memes are captioned reaction images (`captionable: false`) with original licensing and the player's consent recorded. Rejection deletes the copied Blob before removing the queue entry; failure leaves the entry for retry. A minimal rejection tombstone prevents resubmitting the same upload. Removing an already published asset also requires removing its catalog entry and stock files. Pending copies remain until you review/reject them; monitor this queue and Blob usage. Approval/export copies can be retained as provenance.
 
 ## Stock usage measurements
 
@@ -176,7 +187,7 @@ npm run media -- publish-shortlist --input media-work/stock-diverse/candidates.j
 npm run media -- publish-shortlist --input media-work/stock-diverse/candidates.json --sources commons --storage blob --min-score 80 --limit 50
 ```
 
-The default limit is 50; explicit limits up to 1000 are supported. publication.json records successful IDs and failed attempts. Each asset commits independently so a broken download does not leave a whole batch unpublished. Resume skips existing catalog IDs. On HTTP 429, subsequent files from that source are held for the rest of the invocation; wait for the source to recover before retrying. Do not use alternate hosts to work around a rate limit. An upload interrupted between full and preview can still leave an unlisted Blob object; remove it before retrying that asset. Production application visibility requires deploying the updated catalog; uploading files alone does not update the live site.
+The default limit is 50; explicit limits up to 1000 are supported. publication.json records successful IDs and failed attempts. Each asset checkpoints independently; completed uploads are published together when the invocation finishes. Resume skips existing catalog IDs. On HTTP 429, subsequent files from that source are held for the rest of the invocation; wait for the source to recover before retrying. Do not use alternate hosts to work around a rate limit. An upload interrupted between full and preview can still leave an unlisted Blob object; remove it before retrying that asset. After the invocation, the publisher syncs the live Blob catalog. A failed sync leaves the working catalog checkpointed; retry `catalog-sync` without rescoring. Uploading files alone still does not publish them: the atomic catalog switch completes publication.
 
 ## Subject diversity and duplicate control
 
@@ -370,7 +381,7 @@ A fresh depth-two category walk collected 171 source-metadata-eligible records a
 
 This demonstrates that category collection and screening work, while rate limits and uneven quality still constrain yield. A supplemental metadata gate now holds taxidermy and explicitly hateful/sensitive historical descriptions before VLM spending or publication, even if an existing model assessment said safe. Ordinary visual assessments still apply to every published candidate. A small spot-check caught this case; automated screening is not presented as perfect.
 
-The resumed Pexels growth job targets 10,000 actual published templates, with the cumulative $100 screening-estimate limit in its state file. It has not reached that target as of this checkpoint. No production deployment is part of collection.
+The resumed Pexels growth job targets 10,000 actual published templates, with the cumulative $20 screening-estimate limit in its state file. It has not reached that target as of this checkpoint. No production deployment is part of collection.
 
 ### Automatic Commons resumption
 

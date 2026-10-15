@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import {catalogPath,workingCatalogPath} from './catalog-store.mjs';
 import { readFile, writeFile, mkdir, rename, stat } from 'node:fs/promises';
 import { resolve, dirname } from 'node:path';
 import { createHash } from 'node:crypto';
@@ -129,14 +130,14 @@ async function saveJson(path, data) {
   await writeFile(`${path}.tmp`, JSON.stringify(data, null, 2) + '\n');
   await rename(`${path}.tmp`, path);
 }
-export async function importCandidates(input, storage = 'static', workspace = ROOT) {
+export async function importCandidates(input, storage = 'static', workspace = ROOT, {sync = true} = {}) {
   if (!['static', 'blob'].includes(storage)) throw new Error('Storage must be static or blob');
   if (storage === 'blob' && !process.env.BLOB_READ_WRITE_TOKEN) throw new Error('Set BLOB_READ_WRITE_TOKEN for Blob imports');
   if (!Array.isArray(input.candidates) || input.candidates.length > 50) throw new Error('Expected up to 50 candidates');
   const approved = input.candidates.map(reviewedMetadata).filter(Boolean);
   validateCatalog({ version: 1, assets: approved }); // catches duplicate IDs before writes
   if (!approved.length) throw new Error('No approved candidates. Review candidates and record permission first.');
-  const manifestPath = resolve(workspace, 'public/media/catalog.json');
+  const manifestPath = catalogPath(workspace);
   const catalog = validateCatalog(JSON.parse(await readFile(manifestPath, 'utf8')));
   for (const asset of approved) {
     if (catalog.assets.some(existing => existing.id === asset.id)) throw new Error(`${asset.id} already exists; use a new version ID for a replacement`);
@@ -165,7 +166,8 @@ export async function importCandidates(input, storage = 'static', workspace = RO
     additions.push({ ...asset, attribution: { ...asset.attribution, label: `${asset.attribution.label} · resized / converted to WebP` }, url, previewUrl, width: image.width, height: image.height, format: image.format });
   }
   const published = validateCatalog({ version: 1, assets: [...catalog.assets, ...additions] });
-  await saveJson(manifestPath, published);
+  await saveJson(workingCatalogPath(workspace), published);
+  if(storage==='blob'&&sync){const {syncCatalog}=await import('./catalog-publish.mjs');await syncCatalog(workspace);}
   return additions.length;
 }
 
@@ -182,7 +184,8 @@ async function main() {
     if (!args[i].startsWith('--') || !args[i + 1]) throw new Error('Use --option value pairs');
     options[args[i].slice(2)] = args[i + 1];
   }
-  if(command==='growth-status'){const {growthStatus}=await import('./grow-library.mjs');const result=await growthStatus(ROOT,options.state);console.log(JSON.stringify({...result,queries:Object.keys(result.queries).length},null,2));
+  if(command?.startsWith('catalog-')){const {catalogCommand}=await import('./catalog-publish.mjs');await catalogCommand(command,options,ROOT);
+  } else if(command==='growth-status'){const {growthStatus}=await import('./grow-library.mjs');const result=await growthStatus(ROOT,options.state);console.log(JSON.stringify({...result,queries:Object.keys(result.queries).length},null,2));
   } else if(command==='grow-library'){const {growthCommand}=await import('./grow-library.mjs');await growthCommand(options,ROOT);
   } else if(command==='pilot-collect'){const {pilotCommand}=await import('./pilot.mjs');await pilotCommand(options,ROOT);
   } else if(command?.startsWith('archive-')){const {archiveCommand}=await import('./archive-runner.mjs');await archiveCommand(command,options,ROOT);
@@ -252,9 +255,9 @@ async function main() {
   } else if (command === 'import') {
     if (!options.input) throw new Error('Use --input path/to/reviewed.json');
     const count = await importCandidates(JSON.parse(await readFile(resolve(ROOT, options.input), 'utf8')), options.storage || 'static');
-    console.log(`Published ${count} assets. Commit the catalog and static assets, then redeploy.`);
+    console.log(`Published ${count} assets. Blob imports sync the live catalog automatically; static imports are local only.`);
   } else if (command === 'validate') {
-    const catalog = validateCatalog(JSON.parse(await readFile(resolve(ROOT, 'public/media/catalog.json'), 'utf8')));
+    const catalog = validateCatalog(JSON.parse(await readFile(catalogPath(ROOT), 'utf8')));
     for (const asset of catalog.assets) for (const url of [asset.url, asset.previewUrl]) {
       if (url.startsWith('/media/')) await stat(resolve(ROOT, `public${url}`));
     }

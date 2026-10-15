@@ -3,6 +3,7 @@
 import React, { useState, useEffect, useRef, useCallback, useContext, CSSProperties } from "react";
 
 import { recordStockEvent } from "@/lib/media/stock-metrics";
+import {catalogSeed} from '@/lib/media/catalog-seed';
 import { MemeEditor, CreatedMeme } from "./meme-editor";
 import { LocalPicks } from "./local-picks";
 import { MediaCredit } from "./media-credit";
@@ -2227,7 +2228,7 @@ function Submit({ gs, pid, code, apiKey, writeGs, fetchGs, transitioning, transi
               <button type="button" style={{...g.btn,...g.btnS,flex:1}} disabled={generating || memeSubmitting || !query.trim()} onClick={() => setTemplateSearch(query.trim().slice(0,200))}>Search</button>
               <button type="button" style={{...g.btn,...g.btnS,flex:1}} disabled={generating || memeSubmitting} onClick={() => { setMemeTemplate(null); setGenImageUrl(null); }}>Text only</button>
             </div>
-            <LocalPicks key={`meme-${currentRoundIndex}`} captionableOnly searchQuery={templateSearch} selectedId={memeTemplate?.id || ''} disabled={generating || memeSubmitting}
+            <LocalPicks key={`meme-${currentRoundIndex}`} captionableOnly seed={catalogSeed(`${code}:${pid}:${gs.submitDeadline}:${currentRoundIndex}`)} searchQuery={templateSearch} selectedId={memeTemplate?.id || ''} disabled={generating || memeSubmitting}
               onSelect={template => { setMemeTemplate(template); setGenImageUrl(null); setGenError(''); }}
               onExposure={ids => recordStockEvent({ code, pid, token: getRoomToken(code), gameId: gs.submitDeadline, roundIndex: currentRoundIndex }, "exposed", ids)} onSubmit={submitMedia} colors={C} styles={g}/>
             {templateSearch && <div style={g.info}>Images matching “{templateSearch}” · <button type="button" style={g.btnSm} onClick={() => setTemplateSearch('')}>Browse all</button></div>}

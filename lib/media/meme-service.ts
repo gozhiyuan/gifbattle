@@ -6,7 +6,7 @@ export class MemeRequestError extends Error {
 export interface MemeDependencies {
   getRoom: (code: string) => Promise<{ phase?: string; submitDeadline?: number; players?: { id: string }[] } | null>;
   validToken: (code: string, pid: string, token: string) => Promise<boolean>;
-  findTemplate: (id: string) => LocalAsset | undefined;
+  findTemplate: (id: string) => LocalAsset | undefined | Promise<LocalAsset | undefined>;
   storageConfigured: () => boolean;
   rateLimit: (code: string) => Promise<{ allowed: boolean; retryAfterSec: number }>;
   render: (template: LocalAsset, captions: string[]) => Promise<{ image: Buffer; width: number; height: number }>;
@@ -23,7 +23,7 @@ export async function createMeme(body: any, deps: MemeDependencies) {
   if (!isPlayer(room) || !await deps.validToken(body.code, body.pid, body.token)) throw new MemeRequestError('forbidden', 403);
   const isOpen = (state: typeof room) => state?.phase === 'submitting' && state.submitDeadline === body.gameId && state.submitDeadline > Date.now();
   if (!isOpen(room)) throw new MemeRequestError('round_closed', 409);
-  const template = deps.findTemplate(body.templateId);
+  const template = await deps.findTemplate(body.templateId);
   if (!template || !template.captionable || template.format !== 'image') throw new MemeRequestError('invalid_template', 400);
   let captions: string[];
   try { captions = normalizeCaptions(body.captions, template.captionLayout, template.captionMaxLength); }

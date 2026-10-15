@@ -13,6 +13,7 @@ jobs:
     timeout-minutes: 20
     env:
       # Test-only placeholders: browser APIs are intercepted by Playwright.
+      MEDIA_CATALOG_SOURCE: fixture
       NEXT_PUBLIC_GIPHY_KEY: test-giphy-key
       NEXT_PUBLIC_KLIPY_KEY: test-klipy-key
       NEXT_PUBLIC_SITE_URL: http://127.0.0.1:3100

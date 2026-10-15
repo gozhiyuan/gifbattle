@@ -151,7 +151,9 @@ export async function POST(req: NextRequest) {
     if(!allowsAnswerMode(room,roundIndex,'meme'))return NextResponse.json({error:'wrong_answer_mode'},{status:409});
     gamePrompt=room.prompts[roundIndex];
   }
-  const template = memeImage && typeof templateId === 'string' ? findTemplate(templateId) : undefined;
+  let template;
+  try { template = memeImage && typeof templateId === 'string' ? await findTemplate(templateId) : undefined; }
+  catch { return NextResponse.json({error:'catalog_unavailable'},{status:503}); }
   if (memeImage && templateId != null && (!template || typeof templateId !== 'string')) return NextResponse.json({error:'invalid_template'},{status:400});
   const blobToken = process.env.BLOB_READ_WRITE_TOKEN;
   if (!blobToken) return NextResponse.json({ error: "storage_not_configured" }, { status: 500 });

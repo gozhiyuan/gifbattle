@@ -1,13 +1,14 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { isMediaAdmin, contributionRedis as redis } from '@/lib/media/contribution-storage';
-import { catalog } from '@/lib/media/catalog-server';
+import { getCatalog } from '@/lib/media/catalog-server';
 export const dynamic = 'force-dynamic';
 export async function GET(request: NextRequest) {
   const headers = { 'Cache-Control': 'no-store' };
   if (!isMediaAdmin(request.headers.get('authorization'))) return NextResponse.json({ error: 'forbidden' }, { status: 403, headers });
   const offset = Number(request.nextUrl.searchParams.get('offset') || 0);
-  if (!Number.isInteger(offset) || offset < 0 || offset > catalog.assets.length) return NextResponse.json({ error: 'invalid_offset' }, { status: 400, headers });
+  if (!Number.isInteger(offset) || offset < 0) return NextResponse.json({ error: 'invalid_offset' }, { status: 400, headers });
   try {
+    const {catalog}=await getCatalog();
     const assets = await Promise.all(catalog.assets.slice(offset, offset + 50).map(async asset => {
       const metric = await redis.hgetall<Record<string, number>>(`gifbattle:stock-metric:${asset.id}`) || {};
       const exposed = Number(metric.exposed || 0), selected = Number(metric.selected || 0);

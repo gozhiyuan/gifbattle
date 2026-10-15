@@ -1,3 +1,4 @@
+import {catalogPath} from './catalog-store.mjs';
 import { readFile, writeFile, mkdir, rename } from 'node:fs/promises';
 import { resolve, dirname } from 'node:path';
 import { STOCK_CATEGORIES } from '../../lib/media/stock-categories.cjs';
@@ -33,7 +34,7 @@ export async function publishShortlist(inputPath, workspace, { storage = 'blob',
   if (!Number.isInteger(minimum) || minimum < 80 || minimum > 100 || !Number.isInteger(limit) || limit < 1 || limit > 1000) throw new Error('Use min-score 80–100 and limit 1–1000');
   if (!(maxSubjectShare >= 0.125 && maxSubjectShare <= 0.5)) throw new Error('Use max-subject-share between 0.125 and 0.5');
   const input = JSON.parse(await readFile(inputPath, 'utf8'));
-  const manifestPath = resolve(workspace, 'public/media/catalog.json');
+  const manifestPath = catalogPath(workspace);
   const catalog = JSON.parse(await readFile(manifestPath, 'utf8'));
   const existing = new Set([...catalog.assets, ...await loadExclusions(workspace)].map(asset => asset.id));
   const selected = input.candidates.map(candidate => strictCandidate(candidate, minimum)).filter(candidate => candidate && sources.includes(candidate.source) && !existing.has(candidate.id)).sort((a, b) => b.aiSuggestions.reactionScore - a.aiSuggestions.reactionScore);
@@ -67,7 +68,7 @@ export async function publishShortlist(inputPath, workspace, { storage = 'blob',
       status.failures[candidate.id] = { reason: quotaReason, subject, attemptedAt: new Date().toISOString() }; await save(statusPath,status); continue;
     }
     try {
-      await importCandidates({ candidates: [candidate] }, storage, workspace);
+      await importCandidates({ candidates: [candidate] }, storage, workspace, {sync:false});
       subjectCounts.set(subject,(subjectCounts.get(subject)||0)+1);
       const detail=subject+':'+inferDetail(candidate,subject);detailCounts.set(detail,(detailCounts.get(detail)||0)+1);const creator=candidate.creator.trim().toLowerCase();creatorCounts.set(creator,(creatorCounts.get(creator)||0)+1);
       if(candidate.visualFingerprint) references.push({id:candidate.id,fingerprint:candidate.visualFingerprint,creator:candidate.creator,subject,detail:inferDetail(candidate,subject),scene:sceneText(candidate)});
@@ -80,6 +81,7 @@ export async function publishShortlist(inputPath, workspace, { storage = 'blob',
     }
     await save(statusPath, status);
   }
+  if(storage==='blob'){const {syncCatalog}=await import('./catalog-publish.mjs');await syncCatalog(workspace);}
   console.log(`Published ${count} new assets. Failed records remain checkpointed; existing catalog IDs skipped on resume.`);
   return count;
 }

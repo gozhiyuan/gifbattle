@@ -1,3 +1,4 @@
+import {catalogPath} from './catalog-store.mjs';
 import {resolve,dirname} from 'node:path';
 import {readFile,writeFile,mkdir,rename,unlink} from 'node:fs/promises';
 import {createHash,randomUUID} from 'node:crypto';
@@ -50,7 +51,7 @@ export async function growLibrary(workspace,{target=10000,batchSize=2000,maxUsd=
  const settings={target,batchSize,maxUsd,maxCalls,plan:GROWTH_PLAN_VERSION};let state;try{state=JSON.parse(await readFile(statePath,'utf8'));}catch(e){if(e.code!=='ENOENT')throw e;}
  if(state&&JSON.stringify(state.settings)!==JSON.stringify(settings))throw new Error('Growth resume settings differ; retain the original settings or use a new state file');
  state||={settings,id:randomUUID(),batch:0,runs:[],phase:'collect',status:'running'};
- const report=async()=>{const catalog=JSON.parse(await readFile(resolve(workspace,'public/media/catalog.json'),'utf8'));const result=growthReport(catalog,[...archive.entries()],state.runs.map(id=>archive.run(id)),target);const output={...result,status:state.status};await save(resolve(dirname(statePath),'report.json'),output);return output;};
+ const report=async()=>{const catalog=JSON.parse(await readFile(catalogPath(workspace),'utf8'));const result=growthReport(catalog,[...archive.entries()],state.runs.map(id=>archive.run(id)),target);const output={...result,status:state.status};await save(resolve(dirname(statePath),'report.json'),output);return output;};
  state.status='running';await save(statePath,state);let batches=0;
  while(batches<maxBatches){
   let progress=await report();if(!progress.remaining){state.status='target_reached';break;}
@@ -85,7 +86,7 @@ export async function growthStatus(workspace,stateFile='media-work/growth/state.
  const statePath=resolve(workspace,stateFile),state=JSON.parse(await readFile(statePath,'utf8'));
  const archive=new CandidateArchive(resolve(workspace,'media-work/archive/candidates.sqlite'));
  try{
-  const catalog=JSON.parse(await readFile(resolve(workspace,'public/media/catalog.json'),'utf8'));
+  const catalog=JSON.parse(await readFile(catalogPath(workspace),'utf8'));
   const report=growthReport(catalog,[...archive.entries()],state.runs.map(id=>archive.run(id)),state.settings.target);
   const cohort=`growth-${state.id}-${state.batch}`;
   const current=archive.db.prepare("SELECT COUNT(*) AS n FROM candidates WHERE json_extract(data,'$.archiveCohort')=?").get(cohort).n;

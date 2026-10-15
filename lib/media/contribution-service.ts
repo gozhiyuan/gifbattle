@@ -11,7 +11,7 @@ export interface ContributionRecord {
 export interface ContributionDependencies {
   authorized: (code: string, pid: string, token: string, gameId: number) => Promise<boolean>;
   receipt: (url: string) => Promise<MemeReceipt | null>;
-  template: (id: string) => LocalAsset | undefined;
+  template: (id: string) => LocalAsset | undefined | Promise<LocalAsset | undefined>;
   existing: (id: string) => Promise<{ id: string; status: 'pending' | 'approved' | 'rejected' } | null>;
   lock: (id: string) => Promise<boolean>; unlock: (id: string) => Promise<void>;
   limit: (code: string) => Promise<boolean>;
@@ -25,7 +25,7 @@ export async function contributeMeme(body: any, deps: ContributionDependencies) 
   if (!await deps.authorized(body.code, body.pid, body.token, body.gameId)) throw new MemeRequestError('forbidden', 403);
   const receipt = await deps.receipt(body.url);
   if (!receipt || receipt.code !== body.code || receipt.gameId !== body.gameId || receipt.pid !== body.pid || receipt.url !== body.url) throw new MemeRequestError('forbidden', 403);
-  const template = deps.template(receipt.templateId);
+  const template = await deps.template(receipt.templateId);
   if (!template) throw new MemeRequestError('invalid_template', 400);
   // Identity is tied to the server receipt, never client-provided text or source metadata.
   const id = createHash('sha256').update(body.url).digest('hex').slice(0, 32);
