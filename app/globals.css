@@ -1,56 +1,20 @@
-@import url('https://fonts.googleapis.com/css2?family=Bebas+Neue&family=DM+Sans:wght@400;500;600;700&family=Space+Mono:wght@400;700&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Big+Shoulders+Display:wght@700;800&family=DM+Sans:wght@400;500;600;700&family=Space+Mono:wght@400;700&display=swap');
 
 * { box-sizing: border-box; }
 body { margin: 0; padding: 0; }
-
-:root {
-  --code-glow-1: #00e5ff99;
-  --code-glow-2: #00e5ff44;
-  --code-glow-3: #00e5ff;
-  --code-glow-4: #00e5ff66;
-  --code-glow-5: #00e5ff22;
-}
-
-@media (prefers-color-scheme: light) {
-  :root {
-    --code-glow-1: #007aa899;
-    --code-glow-2: #007aa844;
-    --code-glow-3: #007aa8;
-    --code-glow-4: #007aa866;
-    --code-glow-5: #007aa833;
-  }
-}
-
-html[data-theme="dark"] {
-  --code-glow-1: #00e5ff99;
-  --code-glow-2: #00e5ff44;
-  --code-glow-3: #00e5ff;
-  --code-glow-4: #00e5ff66;
-  --code-glow-5: #00e5ff22;
-}
-
-html[data-theme="light"] {
-  --code-glow-1: #007aa899;
-  --code-glow-2: #007aa844;
-  --code-glow-3: #007aa8;
-  --code-glow-4: #007aa866;
-  --code-glow-5: #007aa833;
-}
 
 @keyframes timerPulse {
   0%, 100% { opacity: 1; transform: scale(1); }
   50% { opacity: 0.55; transform: scale(1.06); }
 }
 
-@keyframes codeGlow {
-  0%, 100% { text-shadow: 0 0 14px var(--code-glow-1), 0 0 30px var(--code-glow-2); }
-  50% { text-shadow: 0 0 28px var(--code-glow-3), 0 0 60px var(--code-glow-4), 0 0 100px var(--code-glow-5); }
+/* Win moments: a rubber stamp that slams down once */
+@keyframes stampIn {
+  0% { opacity: 0; transform: scale(1.9) rotate(-6deg); }
+  60% { opacity: 1; transform: scale(0.94) rotate(-6deg); }
+  100% { opacity: 1; transform: scale(1) rotate(-6deg); }
 }
-
-@keyframes vsPulse {
-  0%, 100% { transform: scale(1) rotate(-3deg); text-shadow: 0 0 16px #ff297999; }
-  50% { transform: scale(1.14) rotate(3deg); text-shadow: 0 0 40px #ff2979, 0 0 80px #ff297944; }
-}
+.stamp { display: inline-block; transform: rotate(-6deg); animation: stampIn 0.45s cubic-bezier(0.2, 0.9, 0.3, 1.2) both; }
 
 @keyframes fadeUp {
   from { opacity: 0; transform: translateY(18px); }
@@ -64,18 +28,54 @@ html[data-theme="light"] {
 .gif-vote-card { transition: transform 0.18s ease, box-shadow 0.18s ease; }
 .gif-vote-card:hover { transform: translateY(-4px); }
 
-.vote-grid { grid-template-columns: 1fr auto 1fr; }
+/* Game screens (submit / vote / game over) use a wider card than the form screens.
+   Size lives here so it can respond to the viewport; colors stay inline via the theme. */
+.game-page { padding-top: 60px !important; } /* clears the fixed Leave button */
+.game-card { margin-top: 0; }
 
-input:focus {
-  border-color: #ff297966 !important;
-  box-shadow: 0 0 0 3px #ff297916 !important;
+.vote-grid { grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr); }
+.vote-gif { height: clamp(220px, 55vh, 560px); }
+
+.vote-pick {
+  display: block; width: 100%; padding: 0; margin: 0;
+  border: none; background: none; color: inherit; font: inherit;
+  cursor: pointer; text-align: center;
+}
+.vote-pick:focus-visible { outline: 3px solid currentColor; outline-offset: 4px; border-radius: 14px; }
+
+.media-grid { grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); }
+.summary-grid { grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); }
+
+input:focus, textarea:focus {
+  border-color: #E2402F99 !important;
+  box-shadow: 0 0 0 3px #E2402F22 !important;
   outline: none !important;
 }
 
-@media (max-width: 900px) {
-  .vote-grid { grid-template-columns: 1fr; }
-  .vote-vs { padding-top: 0 !important; font-size: 30px !important; }
-  .vote-gif { height: 180px !important; }
+button:focus-visible, a:focus-visible, summary:focus-visible { outline: 2px solid #E2402F; outline-offset: 2px; }
+
+@media (max-width: 640px) {
+  /* Keep the theme toggle off the bottom vote button */
+  .theme-toggle { top: 16px !important; bottom: auto !important; }
+  .form-page { padding: 12px !important; }
+  .form-card { padding: 24px 16px !important; }
+  .game-page { padding: 56px 0 24px !important; }
+  .game-card {
+    margin-top: 0 !important;
+    padding: 14px 12px 20px !important;
+    border-radius: 0 !important;
+    border-left: none !important;
+    border-right: none !important;
+    box-shadow: none !important;
+  }
+  .vote-grid { grid-template-columns: minmax(0, 1fr); gap: 6px !important; }
+  .vote-vs { font-size: 24px !important; }
+  /* Both answers fit on one phone screen without scrolling */
+  /* Split what's left after the fixed header, prompt and vote strips between the two answers,
+     so the second vote button stays on screen on short phones */
+  .vote-gif { height: clamp(120px, calc((100vh - 390px) / 2), 320px); height: clamp(120px, calc((100svh - 390px) / 2), 320px); }
+  .media-grid { grid-template-columns: repeat(auto-fill, minmax(96px, 1fr)); }
+  .summary-grid { grid-template-columns: minmax(0, 1fr); }
 }
 
 @media (prefers-reduced-motion: reduce) {

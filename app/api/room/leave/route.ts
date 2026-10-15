@@ -3,6 +3,7 @@ import { NextRequest, NextResponse } from "next/server";
 import {
   ACTIVE_ROOM_TTL_SECS,
   GAME_OVER_ROOM_TTL_SECS,
+  isValidPlayerId,
   isValidRoomPlayerToken,
   LOBBY_ROOM_TTL_SECS,
   revokeRoomPlayerToken,
@@ -95,7 +96,7 @@ export async function POST(req: NextRequest) {
   if (typeof code !== "string" || !ROOM_CODE_RE.test(code.trim().toUpperCase())) {
     return NextResponse.json({ error: "invalid_code" }, { status: 400 });
   }
-  if (typeof pid !== "string" || !pid.trim()) {
+  if (!isValidPlayerId(pid)) {
     return NextResponse.json({ error: "invalid_pid" }, { status: 400 });
   }
   if (typeof token !== "string" || !token.trim()) {
@@ -103,7 +104,7 @@ export async function POST(req: NextRequest) {
   }
 
   const c = code.trim().toUpperCase();
-  const playerId = pid.trim();
+  const playerId = pid;
   const validToken = await isValidRoomPlayerToken(c, playerId, token);
   if (!validToken) {
     return NextResponse.json({ error: "forbidden" }, { status: 403 });

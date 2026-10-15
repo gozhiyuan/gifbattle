@@ -3,6 +3,8 @@ import { NextRequest, NextResponse } from "next/server";
 import {
   checkIpRateLimit,
   issueRoomPlayerToken,
+  isValidPlayerId,
+  isValidRoomPlayerToken,
   LOBBY_ROOM_TTL_SECS,
 } from "@/lib/room-security";
 
@@ -50,18 +52,18 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  let body: { code?: unknown; pid?: unknown; nickname?: unknown };
+  let body: { code?: unknown; pid?: unknown; nickname?: unknown; token?: unknown };
   try {
     body = await req.json();
   } catch {
     return NextResponse.json({ error: "invalid_body" }, { status: 400 });
   }
-  const { code, pid, nickname } = body;
+  const { code, pid, nickname, token: presentedToken } = body;
 
   if (typeof code !== "string" || !ROOM_CODE_RE.test(code.trim().toUpperCase())) {
     return NextResponse.json({ error: "invalid_code" }, { status: 400 });
   }
-  if (typeof pid !== "string" || !pid.trim()) {
+  if (!isValidPlayerId(pid)) {
     return NextResponse.json({ error: "invalid_pid" }, { status: 400 });
   }
   if (typeof nickname !== "string" || !nickname.trim()) {
@@ -84,8 +86,21 @@ export async function POST(req: NextRequest) {
   }
 
   switch (result) {
-    case "JOINED":
     case "ALREADY_JOINED": {
+      // Player IDs are public to anyone with the room code, so rejoining under an existing ID
+      // must prove it with that player's current token. Never mint a new one here: that would
+      // hand any visitor the host's identity and lock the real host out.
+      let valid = false;
+      try {
+        valid = typeof presentedToken === "string" && await isValidRoomPlayerToken(c, pid, presentedToken);
+      } catch (error) {
+        console.error("room_join_token_check_failed", { code: c, pid, error });
+        return NextResponse.json({ error: "join_failed" }, { status: 500 });
+      }
+      if (!valid) return NextResponse.json({ error: "already_joined" }, { status: 409 });
+      return NextResponse.json({ ok: true, code: c, token: presentedToken });
+    }
+    case "JOINED": {
       let token = "";
       try {
         token = await issueRoomPlayerToken(c, pid);

@@ -1,21 +1,22 @@
 import { NextRequest, NextResponse } from "next/server";
-import { checkGiphySearchBudget, getRoomState, isRoomPlayer } from "@/lib/room-security";
+import { authorizeRoomPlayer, checkGiphySearchBudget } from "@/lib/room-security";
 
 export async function POST(req: NextRequest) {
   let code = "";
   let pid = "";
+  let token = "";
   try {
     const body = await req.json();
     code = (body.code || "").trim().toUpperCase();
     pid = body.pid || "";
+    token = body.token || "";
   } catch {
     return NextResponse.json({ error: "invalid_request" }, { status: 400 });
   }
 
   if (!code || !pid) return NextResponse.json({ error: "invalid_request" }, { status: 400 });
 
-  const room = await getRoomState(code);
-  if (!isRoomPlayer(room, pid)) {
+  if (!(await authorizeRoomPlayer(code, pid, token))) {
     return NextResponse.json({ error: "forbidden" }, { status: 403 });
   }
 

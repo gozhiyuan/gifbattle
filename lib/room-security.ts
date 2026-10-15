@@ -1,4 +1,7 @@
 import { Redis } from "@upstash/redis";
+import { isValidPlayerId } from "./player-id";
+
+export { isValidPlayerId };
 
 const redis = Redis.fromEnv();
 export const ACTIVE_ROOM_TTL_SECS = 4 * 60 * 60;
@@ -19,6 +22,7 @@ export type RoomState = {
   votingRound?: number;
   currentMatchup?: number;
   matchups?: string[][];
+  voteDeadline?: number | null;
   code?: string;
   host?: string;
   createdAt?: number;
@@ -131,7 +135,7 @@ const makeRoomPlayerToken = () => `${crypto.randomUUID()}${crypto.randomUUID().r
 
 export async function issueRoomPlayerToken(code: string, pid: string): Promise<string> {
   const c = normalizeCode(code);
-  const playerId = pid.trim();
+  const playerId = isValidPlayerId(pid) ? pid : "";
   if (!c || !playerId) return "";
   const token = makeRoomPlayerToken();
   try {
@@ -145,7 +149,7 @@ export async function issueRoomPlayerToken(code: string, pid: string): Promise<s
 
 export async function revokeRoomPlayerToken(code: string, pid: string): Promise<void> {
   const c = normalizeCode(code);
-  const playerId = pid.trim();
+  const playerId = isValidPlayerId(pid) ? pid : "";
   if (!c || !playerId) return;
   try {
     await redis.del(roomPlayerTokenKey(c, playerId));
@@ -161,7 +165,7 @@ export async function isValidRoomPlayerToken(
   token: string
 ): Promise<boolean> {
   const c = normalizeCode(code);
-  const playerId = pid.trim();
+  const playerId = isValidPlayerId(pid) ? pid : "";
   const presented = token.trim();
   if (!c || !playerId || !presented) return false;
   try {
@@ -169,6 +173,35 @@ export async function isValidRoomPlayerToken(
     return typeof stored === "string" && stored === presented;
   } catch (error) {
     logRedisError("is_valid_room_player_token", { code: c, playerId }, error);
+    throw error;
+  }
+}
+
+// Player IDs are visible to anyone holding the room code (room state is readable via /api/store),
+// so a pid alone never proves identity. Routes that act for a player must also check the secret
+// token issued at create/join. Returns the room when authorized, otherwise null.
+export async function authorizeRoomPlayer(
+  code: string,
+  pid: unknown,
+  token: unknown,
+  opts: { host?: boolean } = {}
+): Promise<RoomState | null> {
+  if (!isValidPlayerId(pid) || typeof token !== "string" || !token || token.length > 200) return null;
+  const room = await getRoomState(code);
+  if (!(opts.host ? isRoomHost(room, pid) : isRoomPlayer(room, pid))) return null;
+  if (!(await isValidRoomPlayerToken(code, pid, token))) return null;
+  return room;
+}
+
+// One vote per player per matchup: the first write wins (SET NX). Re-sending the same vote is fine.
+export async function recordRoomVote(key: string, side: string): Promise<"ok" | "conflict"> {
+  try {
+    const set = await redis.set(key, side, { nx: true, ex: 86400 });
+    if (set === "OK") return "ok";
+    const existing = await redis.get(key);
+    return existing === side ? "ok" : "conflict";
+  } catch (error) {
+    logRedisError("record_room_vote", { key }, error);
     throw error;
   }
 }

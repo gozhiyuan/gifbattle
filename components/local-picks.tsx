@@ -14,7 +14,7 @@ export function LocalPicks({ onSubmit, colors, styles, captionableOnly = false, 
   onExposure?: (ids: string[]) => void;
   onUnavailable?: () => Promise<void>;
   renderSelection?: (item: MediaResult) => ReactNode;
-  colors: { card2: string; text: string; muted: string; accent: string };
+  colors: { bg: string; card2: string; text: string; muted: string; accent: string };
   styles: Record<string, CSSProperties>;
 }) {
   const [internalQuery, setQuery] = useState('');
@@ -79,15 +79,15 @@ export function LocalPicks({ onSubmit, colors, styles, captionableOnly = false, 
     <div style={{ fontSize: 12, color: colors.muted, marginBottom: 12 }}>{captionableOnly ? "Choose an image for your caption, or submit text only." : "Browse our collection of reaction images and animations."}</div>
     <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginBottom: 12 }}>
       {['All', ...STOCK_CATEGORIES.map(category => category.label)].map(label => <button key={label} disabled={disabled} onClick={() => choose(label === 'All' ? '' : label.toLowerCase())}
-        style={{ ...styles.btnSm, background: category === (label === 'All' ? '' : label.toLowerCase()) ? colors.accent : colors.card2, color: category === (label === 'All' ? '' : label.toLowerCase()) ? '#fff' : colors.text }}>{label}</button>)}
+        style={{ ...styles.btnSm, background: category === (label === 'All' ? '' : label.toLowerCase()) ? colors.text : colors.card2, color: category === (label === 'All' ? '' : label.toLowerCase()) ? colors.bg : colors.text }}>{label}</button>)}
     </div>
     {error ? <div role="alert" style={styles.err}>{error}</div> : loading && !items.length ? <div style={styles.info}>Loading templates…</div> : !items.length ?
       <div style={styles.info}>{query || category ? 'No matching picks. Try another category or search.' : 'Meme templates are being prepared. You can still submit text only or generate an image with AI.'}</div> :
-      <div ref={grid} style={{ display: 'grid', gridTemplateColumns: 'repeat(3,1fr)', gap: 8, maxHeight: 320, overflowY: 'auto', marginBottom: 12 }}>
+      <div ref={grid} className="media-grid" style={{ display: 'grid', gap: 8, maxHeight: 'min(52vh, 520px)', overflowY: 'auto', marginBottom: 12 }}>
         {items.map(item => <button key={item.id} data-asset={item.providerId} aria-label={`Select ${item.title}`} aria-pressed={(selectedId ?? selected?.id) === item.id}
           disabled={disabled} onClick={() => { setSelected(item); onSelect?.(item); }} style={{ cursor: 'pointer', borderRadius: 8, padding: 4, background: colors.card2,
             color: colors.text, border: `2px solid ${(selectedId ?? selected?.id) === item.id ? colors.accent : 'transparent'}` }}>
-          <img src={item.previewUrl} alt={item.title} loading="lazy" style={{ display: 'block', width: '100%', height: 90, objectFit: 'contain' }} />
+          <img src={item.previewUrl} alt={item.title} loading="lazy" style={{ display: 'block', width: '100%', aspectRatio: '4 / 3', height: 'auto', objectFit: 'contain' }} />
           {!captionableOnly && <div style={{ fontSize: 11, marginTop: 4 }}>{item.title}{item.format === 'animation' ? ' · GIF' : ''}</div>}
         </button>)}
       </div>}

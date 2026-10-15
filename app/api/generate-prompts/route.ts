@@ -2,8 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import {
   checkRoomRateLimit,
   getRoomGeminiKey,
-  getRoomState,
-  isRoomPlayer,
+  authorizeRoomPlayer,
 } from "@/lib/room-security";
 import { fetchWithRetry } from "@/lib/gemini-retry";
 
@@ -73,12 +72,14 @@ export async function POST(req: NextRequest) {
   let existingPrompts: string[] = [];
   let roomCode = "";
   let pid = "";
+  let token = "";
   let model = DEFAULT_MODEL;
   try {
     const body = await req.json();
     existingPrompts = Array.isArray(body.existingPrompts) ? body.existingPrompts : [];
     roomCode = (body.roomCode ?? "").trim().toUpperCase();
     pid = body.pid ?? "";
+    token = body.token ?? "";
     model = body.model ?? DEFAULT_MODEL;
   } catch {
     return NextResponse.json({ error: "invalid_request" }, { status: 400 });
@@ -88,8 +89,7 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "forbidden" }, { status: 403 });
   }
 
-  const room = await getRoomState(roomCode);
-  if (!isRoomPlayer(room, pid)) {
+  if (!(await authorizeRoomPlayer(roomCode, pid, token))) {
     return NextResponse.json({ error: "forbidden" }, { status: 403 });
   }
 

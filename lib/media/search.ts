@@ -1,9 +1,10 @@
 import { automaticFallback, PAGE_SIZE, providerLabels, remoteProviders } from "./provider-config";
 import { GifProvider, MediaResult, ProviderError, RemoteProvider } from "./types";
 import { recordGifEvent } from "./telemetry";
+import { getRoomToken } from "../room-token";
 export async function reserveProviderRequest(provider: RemoteProvider, code: string, pid: string, signal?: AbortSignal) {
   const response = await fetch("/api/gif-search-budget", {
-    method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ provider, code, pid }), signal,
+    method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ provider, code, pid, token: getRoomToken(code) }), signal,
   });
   if (!response.ok) {
     const data = await response.json().catch(() => ({}));

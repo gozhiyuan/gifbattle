@@ -3,9 +3,9 @@ import { NextRequest, NextResponse } from "next/server";
 import {
   checkRoomRateLimit,
   getRoomGeminiKey,
+  authorizeRoomPlayer,
   getRoomState,
   isRoomPlayer,
-  isValidRoomPlayerToken,
 } from "@/lib/room-security";
 import { fetchWithRetry } from "@/lib/gemini-retry";
 import {allowsAnswerMode} from '@/lib/answer-modes';
@@ -142,11 +142,11 @@ export async function POST(req: NextRequest) {
   }
 
   if (!roomCode || !pid) return NextResponse.json({ error: "forbidden" }, { status: 403 });
-  const room = await getRoomState(roomCode);
-  if (!isRoomPlayer(room, pid)) return NextResponse.json({ error: "forbidden" }, { status: 403 });
+  // Every image spends the host's Gemini key, so the token is required on both paths, not only meme images
+  const room = await authorizeRoomPlayer(roomCode, pid, token);
+  if (!room) return NextResponse.json({ error: "forbidden" }, { status: 403 });
   if (memeImage) {
-    if(typeof textAnswer!=='string'||textAnswer.length>280||typeof token!=='string'||!token||token.length>200||!Number.isSafeInteger(gameId)||!Number.isInteger(roundIndex)||roundIndex<0)return NextResponse.json({error:'invalid_request'},{status:400});
-    if(!await isValidRoomPlayerToken(roomCode,pid,token))return NextResponse.json({error:'forbidden'},{status:403});
+    if(typeof textAnswer!=='string'||textAnswer.length>280||!Number.isSafeInteger(gameId)||!Number.isInteger(roundIndex)||roundIndex<0)return NextResponse.json({error:'invalid_request'},{status:400});
     if(room.phase!=='submitting'||room.submitDeadline!==gameId||room.submitDeadline<=Date.now()||!Number.isInteger(roundIndex)||roundIndex<0||!room.prompts?.[roundIndex]||(room.roundPlan?.length&&!room.roundPlan[roundIndex]?.participants?.includes(pid))||room.submissions?.[pid]?.[roundIndex])return NextResponse.json({error:'round_closed'},{status:409});
     if(!allowsAnswerMode(room,roundIndex,'meme'))return NextResponse.json({error:'wrong_answer_mode'},{status:409});
     gamePrompt=room.prompts[roundIndex];
