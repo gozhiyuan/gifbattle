@@ -29,3 +29,22 @@ test('AI image inspiration comes from catalog metadata and still requires an ori
  const prompt=memeImagePrompt('comic','Dinner','WHERE IS MY DINNER',{title:'Hungry cat',description:'A cat looking at an empty bowl'});
  expect(prompt).toContain('Hungry cat');expect(prompt).toContain('empty bowl');expect(prompt).toContain('new original scene');expect(prompt).toContain('WHERE IS MY DINNER');
 });
+
+test('AI rewrites use the room model and canonical template limit', async () => {
+ const d = {...deps(), getRoom:async()=>({...room,geminiModel:'gemini-3.6-flash'}),
+  findTemplate:async()=>({captionMaxLength:40}),
+  suggest:async(prompt,draft,key,limit,model)=>{expect(draft).toBe('My joke');expect(limit).toBe(40);expect(model).toBe('gemini-3.6-flash');return ['My sharper joke'];}};
+ expect(await reviseMemeAnswer({...body,templateId:'cat'},d)).toEqual({suggestions:['My sharper joke']});
+ await expect(reviseMemeAnswer({...body,templateId:'missing'},{...d,findTemplate:async()=>undefined})).rejects.toMatchObject({code:'invalid_template'});
+});
+
+test('overlong generated captions are rejected instead of silently truncating jokes', async () => {
+ const values = await suggestFunnyAnswers('Dinner','My draft','key',async(url,init)=>{
+  expect(String(url)).toContain('gemini-3.8-flash');
+  const request=JSON.parse(init.body as string);
+  expect(request.generationConfig.responseJsonSchema.properties.suggestions.items.maxLength).toBe(40);
+  expect(request.contents[0].parts[0].text).toContain('REWRITE that draft');
+  return Response.json({candidates:[{content:{parts:[{text:JSON.stringify({suggestions:['x'.repeat(41),'Still waiting for dinner']})}]}}]});
+ },40);
+ expect(values).toEqual(['Still waiting for dinner']);
+});

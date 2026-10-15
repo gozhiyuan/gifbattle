@@ -11,6 +11,7 @@ import { safeHttps } from "@/lib/media/catalog-schema.cjs";
 
 import { hostGraceMs, heartbeatIsFresh } from "@/lib/host-presence";
 import { getRoomToken, setRoomToken, clearRoomToken } from "@/lib/room-token";
+import { buildPromptsForPlan, promptIdentity } from "@/lib/game-prompts";
 import { voteKey } from "@/lib/votes";
 import { ANSWER_MODE_POLICY, CHOICE_MODE_POLICY, getAnswerMode, modeForCycle, answerModeLabels, isChoiceMode, submissionAllowedForQuestion } from "@/lib/answer-modes";
 import { MediaResult, RemoteProvider, ProviderError } from "@/lib/media/types";
@@ -301,84 +302,6 @@ const getNamePromptRounds = (state) => {
 const getEligibleCompetitors = (playerCount: number, maxCompetitors: number) => {
   const capped = Math.min(playerCount, maxCompetitors);
   return capped % 2 === 0 ? capped : capped - 1;
-};
-
-const pickPrompts = (pool: string[], count: number, avoid: string[] = []) => {
-  const avoidSet = new Set(avoid.filter(Boolean));
-  const preferred = pool.filter((p) => !avoidSet.has(p));
-  const preferredShuffled = [...preferred].sort(() => Math.random() - 0.5);
-  const allShuffled = [...pool].sort(() => Math.random() - 0.5);
-
-  if (count <= preferredShuffled.length) return preferredShuffled.slice(0, count);
-
-  const picked = [...preferredShuffled];
-  for (const candidate of allShuffled) {
-    if (picked.length >= count) break;
-    if (!picked.includes(candidate)) picked.push(candidate);
-  }
-  while (picked.length < count && pool.length > 0) {
-    picked.push(pool[Math.floor(Math.random() * pool.length)]);
-  }
-  return picked;
-};
-
-const pickCycles = (rounds: number, namePromptRounds: number) => {
-  const all = Array.from({ length: rounds }, (_, i) => i).sort(() => Math.random() - 0.5);
-  return new Set(all.slice(0, Math.min(rounds, Math.max(0, namePromptRounds))));
-};
-
-const buildNamePrompt = (names: string[]) => {
-  const uniq = Array.from(new Set(names.filter(Boolean))).slice(0, 3);
-  const [a = "someone", b = "someone else", c = "the whole crew"] = uniq;
-  const trio = uniq.length >= 3 ? `${a}, ${b}, and ${c}` : `${a} and ${b}`;
-  const templates = [
-    `When ${a} says "just one game"`,
-    `Me watching ${a} and ${b} choose chaos`,
-    `That moment when ${trio} share one brain cell`,
-    `When ${a} and ${b} both think they're right`,
-    `Me trying to keep up with ${trio}`,
-    `That moment when ${a} starts and ${b} escalates`,
-    `When ${trio} act like this was a good idea`,
-    `Me after trusting ${a}'s "perfect" plan`,
-  ];
-  return templates[Math.floor(Math.random() * templates.length)];
-};
-
-const buildPromptsForPlan = (
-  pool: string[],
-  plan,
-  rounds: number,
-  namePromptRounds: number,
-  playerNameById: Map<string, string>,
-  customPromptPool: string[] = [],
-  recentPrompts: string[] = []
-) => {
-  const nameCycles = pickCycles(rounds, namePromptRounds);
-  const nameSlots = plan.filter(p => nameCycles.has(p.cycle)).length;
-  const standardPrompts = pickPrompts(pool, Math.max(0, plan.length - nameSlots), recentPrompts);
-  let standardIdx = 0;
-
-  const pickedPrompts = plan.map((entry) => {
-    if (!nameCycles.has(entry.cycle)) {
-      const picked = standardPrompts[standardIdx];
-      standardIdx += 1;
-      return picked;
-    }
-    const names = (entry.participants || [])
-      .map((id) => playerNameById.get(id) || "")
-      .filter(Boolean);
-    return buildNamePrompt(names);
-  });
-
-  if (customPromptPool.length === 0) return pickedPrompts;
-  const customSet = new Set(customPromptPool);
-  if (pickedPrompts.some((p) => customSet.has(p))) return pickedPrompts;
-
-  const standardIndex = plan.findIndex((entry) => !nameCycles.has(entry.cycle));
-  const fallbackIndex = standardIndex >= 0 ? standardIndex : 0;
-  const forcedCustom = customPromptPool[Math.floor(Math.random() * customPromptPool.length)];
-  pickedPrompts[fallbackIndex] = forcedCustom;
-  return pickedPrompts;
 };
 
 const buildRoundPlan = (playerIds: string[], rounds: number, maxCompetitors: number) => {
@@ -1365,7 +1288,7 @@ function Lobby({ gs, pid, code, isHost, startGame, leave, writeGs }) {
   const maskKey = (k: string) => k.length > 8 ? k.slice(0, 7) + "…" + k.slice(-4) : "••••••••";
 
   const GEMINI_MODELS = [
-    { id: "gemini-3.5-flash", label: "3.5 Flash" },
+    { id: "gemini-3.8-flash", label: "3.8 Flash" },
     { id: "gemini-3.6-flash", label: "3.6 Flash" },
   ];
   const modelIds = new Set(GEMINI_MODELS.map(m => m.id));
@@ -1488,7 +1411,7 @@ function Lobby({ gs, pid, code, isHost, startGame, leave, writeGs }) {
           setLlmCreateStatus({ ok: false, message: "LLM response format was invalid. Please retry." });
           return;
         }
-        const newPrompts = generated.filter(p => !customPrompts.includes(p));
+        const newPrompts = generated.filter(p => !customPrompts.some(existing => promptIdentity(existing) === promptIdentity(p)));
         if (newPrompts.length === 0) {
           setLlmCreateStatus({ ok: false, message: "LLM completed, but no new unique questions were added." });
           return;
@@ -1757,6 +1680,7 @@ function Lobby({ gs, pid, code, isHost, startGame, leave, writeGs }) {
           </div>
         ))}
         <div style={{marginTop:16}}>
+          {gs.players.length === 2 && <div role="status" style={g.info}>Two-player showcase: voting is skipped and each answer earns 1 point. Add a third player for voting.</div>}
           {isHost
             ?<button className="gbtn" style={{...g.btn,...g.btnP}} disabled={alternateSaving} onClick={startGame}>{alternateSaving ? "Saving settings…" : gs.players.length<2?"⏳ Need more players…":"🚀 Start Game"}</button>
             :<div style={{textAlign:"center",color:C.muted,padding:12,background:C.card2,borderRadius:10,marginBottom:10,border:`1px solid ${C.muted}22`}}>⏳ Waiting for host to start…</div>}
@@ -1935,10 +1859,10 @@ function Submit({ gs, pid, code, apiKey, writeGs, fetchGs, transitioning, transi
     setRevising(true); setGenError(""); setAnswerSuggestions([]);
     try {
       const response = await fetch('/api/meme-answers', { method: 'POST', headers: { 'Content-Type': 'application/json' }, signal: controller.signal,
-        body: JSON.stringify({ code, pid, token: getRoomToken(code), gameId: gs.submitDeadline, roundIndex: currentRoundIndex, draft: query.trim() }) });
+        body: JSON.stringify({ code, pid, token: getRoomToken(code), gameId: gs.submitDeadline, roundIndex: currentRoundIndex, draft: query.trim(), templateId: memeTemplate?.providerId }) });
       const data = await response.json();
       if (!response.ok) throw new Error(data.error === 'ai_not_configured' ? 'Ask the host to add a Gemini key to enable AI.' : data.error === 'round_closed' || data.error === 'wrong_answer_mode' ? 'This meme question has ended or changed.' : 'AI suggestions are unavailable. Your answer is still editable.');
-      const choices = Array.isArray(data.suggestions) ? data.suggestions.filter(value => typeof value === 'string' && value.trim() && value.length <= 280).slice(0,3) : [];
+      const choices = Array.isArray(data.suggestions) ? data.suggestions.filter(value => typeof value === 'string' && value.trim() && value.length <= Math.min(90, memeTemplate?.captionMaxLength || 90)).slice(0,3) : [];
       if (!choices.length) throw new Error('No suggestions returned. You can still write your own answer.');
       if (!controller.signal.aborted && revisionRef.current === controller) setAnswerSuggestions(choices);
     } catch (error) { if (!controller.signal.aborted) setGenError(error instanceof Error ? error.message : 'AI suggestions are unavailable.'); }
@@ -2524,8 +2448,9 @@ function RoundResults({ gs, isHost, nextVotingRound, transitioning }) {
               ? `Round ${meta.cycle + 1}/${rounds} · Heat ${meta.heat + 1}/${meta.heatsInCycle} Results`
               : `Round ${(gs.votingRound ?? 0) + 1} Results`}
           </div>
+          {gs.players.length <= 2 && <div role="status" style={g.info}>Two-player showcase: both players are contestants, so voting is skipped. Each submitted answer earns 1 point. Add a third player to vote.</div>}
           {rWinnerNames.length>0&&<div className="stamp" style={{background:C.hi,color:C.onHi,fontFamily:FONT_DISPLAY,fontWeight:800,fontSize:24,
-            letterSpacing:1,padding:"4px 14px 2px",boxShadow:`4px 4px 0 ${C.accent}`}}>{rWinnerNames.join(" & ")} won this round</div>}
+            letterSpacing:1,padding:"4px 14px 2px",boxShadow:`4px 4px 0 ${C.accent}`}}>{rWinnerNames.join(" & ")}{gs.players.length <= 2 ? " tied this round" : " won this round"}</div>}
         </div>
         <Scoreboard players={sorted} highlightIds={rWinners}/>
         <div style={{marginTop:16,textAlign:"center"}}>

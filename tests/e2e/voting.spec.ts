@@ -36,3 +36,28 @@ test("a vote is recorded through the token-checked vote route", async ({ context
   expect(forged).toEqual([405, 403]);
   expect(store.has(`gifbattle:vote:${code}:1700000000000:0:0:pA`)).toBe(false);
 });
+
+test('two players skip voting with an explicit explanation and one point each', async ({ context, page }) => {
+  const store = new Map<string, string>();
+  await installGameApiMocks(context, store);
+  await page.goto('/');
+  await page.getByPlaceholder('Your nickname').fill('Host');
+  await page.getByRole('button', { name: /create room/i }).click();
+  await expect(page.getByText('LOBBY', { exact: true })).toBeVisible();
+  const code = await page.evaluate(() => localStorage.getItem('gifbattle_last_room')!);
+  const key = `gifbattle:room:${code}`;
+  const room = JSON.parse(store.get(key)!);
+  const host = room.host;
+  Object.assign(room, {
+    phase: 'submitting', rounds: 1, prompts: ['When dinner arrives'], submitDeadline: Date.now() + 60000,
+    players: [...room.players, { id: 'guest', nickname: 'Guest', score: 0 }],
+    doneSubmitting: [host, 'guest'],
+    submissions: { [host]: [{ type: 'text', textAnswer: 'Finally' }], guest: [{ type: 'text', textAnswer: 'Still waiting' }] },
+  });
+  store.set(key, JSON.stringify(room));
+  await page.getByRole('button', { name: '⚡ Force Start Voting' }).click();
+  await expect(page.getByRole('status').filter({ hasText: 'both players are contestants' })).toBeVisible();
+  expect(JSON.parse(store.get(key)!).phase).toBe('round_results');
+  expect(JSON.parse(store.get(key)!).players.map(p => p.score)).toEqual([1, 1]);
+  await expect(page.getByRole('button', { name: /vote for the/ })).toHaveCount(0);
+});

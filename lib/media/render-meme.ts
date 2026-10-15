@@ -1,8 +1,11 @@
-import sharp from 'sharp';
+import sharp, { OverlayOptions } from 'sharp';
 import { readFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import { LocalAsset } from './catalog';
-import { captionSvg } from './meme-layout';
+import { captionLines, escapeXml } from './meme-layout';
+
+// Keep font discovery and caches self-contained on serverless hosts.
+process.env.FONTCONFIG_FILE ||= resolve(process.cwd(), 'public/fonts/fonts.conf');
 export async function readTemplateImage(template: LocalAsset) {
   let bytes: Buffer;
   if (template.url.startsWith('/media/')) bytes = await readFile(resolve(process.cwd(), `public${template.url}`));
@@ -21,7 +24,24 @@ export async function readTemplateImage(template: LocalAsset) {
 export async function renderMeme(template: LocalAsset, captions: string[]) {
   const bytes = await readTemplateImage(template);
   const { data, info } = await sharp(bytes, { limitInputPixels: 40000000 }).rotate().resize({ width: 1200, height: 1200, fit: 'inside', withoutEnlargement: true }).toBuffer({ resolveWithObject: true });
-  const overlay = Buffer.from(captionSvg(info.width, info.height, captions, template.captionLayout));
-  const image = await sharp(data).composite([{ input: overlay }]).webp({ quality: 85 }).toBuffer();
+  // Explicit font files work in serverless environments with no system fonts.
+  const overlays: OverlayOptions[] = [];
+  for (const line of captionLines(info.width, info.height, captions, template.captionLayout)) {
+    const stroke = Math.ceil(line.strokeWidth);
+    const glyph = await sharp({ text: { text: `<span foreground="white">${escapeXml(line.text)}</span>`,
+      font: `Noto Sans Bold ${line.fontSize}`, fontfile: resolve(process.cwd(), 'public/fonts/NotoSans-Bold.ttf'), rgba: true, dpi: 72 } })
+      .png().toBuffer({ resolveWithObject: true });
+    const padded = await sharp(glyph.data).extend({ top: stroke, bottom: stroke, left: stroke, right: stroke, background: '#00000000' }).png().toBuffer();
+    const alpha = await sharp(padded).extractChannel('alpha').png().toBuffer();
+    // libvips morphology treats dark pixels as foreground: erode expands the white alpha mask.
+    const mask = await sharp(alpha).erode(stroke).toBuffer();
+    const width = glyph.info.width + stroke * 2, height = glyph.info.height + stroke * 2;
+    const outline = await sharp({ create: { width, height, channels: 3, background: 'black' } })
+      .joinChannel(mask).png().toBuffer();
+    const outlined = await sharp(outline).composite([{ input: padded }]).png().toBuffer();
+    overlays.push({ input: outlined, left: Math.max(0, Math.round((info.width - width) / 2)),
+      top: Math.max(0, Math.round(line.y - glyph.info.height - stroke)) });
+  }
+  const image = await sharp(data).composite(overlays).webp({ quality: 85 }).toBuffer();
   return { image, width: info.width, height: info.height };
 }
