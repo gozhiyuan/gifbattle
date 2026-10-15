@@ -1,10 +1,11 @@
+import {catalogPath} from './catalog-store.mjs';
 import {readFile,writeFile,mkdir} from 'node:fs/promises';
 import {resolve} from 'node:path';
 import {pathToFileURL} from 'node:url';
 import {inferDetail} from '../../lib/media/stock-diversity.cjs';
 import {inferSubject,SUBJECT_IDS} from '../../lib/media/stock-subjects.cjs';
 export async function writeGallery(workspace){
- const {assets}=JSON.parse(await readFile(resolve(workspace,'public/media/catalog.json'),'utf8'));
+ const {assets}=JSON.parse(await readFile(catalogPath(workspace),'utf8'));
  const url=value=>value.startsWith('/media/')?pathToFileURL(resolve(workspace,'public',value.slice(1))).href:value;
  const records=assets.map(a=>({...a,url:url(a.url),previewUrl:url(a.previewUrl||a.url),subject:inferSubject(a),detail:inferDetail(a,inferSubject(a))}));
  const payload=JSON.stringify({assets:records,subjects:SUBJECT_IDS}).replace(/</g,'\\u003c');

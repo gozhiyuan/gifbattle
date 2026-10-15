@@ -1,3 +1,4 @@
+import {catalogPath} from './catalog-store.mjs';
 import {readFile,writeFile,mkdir,rename} from 'node:fs/promises';
 import {resolve,dirname} from 'node:path';
 import {fingerprint,sceneSimilarity} from './similarity.mjs';
@@ -16,7 +17,7 @@ export async function readCatalogImage(asset,workspace){
  return Buffer.concat(chunks);
 }
 export async function catalogReferences(workspace,{read=readCatalogImage}={}){
- const assets=JSON.parse(await readFile(resolve(workspace,'public/media/catalog.json'),'utf8')).assets;
+ const assets=JSON.parse(await readFile(catalogPath(workspace),'utf8')).assets;
  const path=resolve(workspace,'media-work/catalog-fingerprints.json');let cache={version:1,assets:{}};
  try{cache=JSON.parse(await readFile(path,'utf8'));}catch(e){if(e.code!=='ENOENT')throw e;}
  if(cache.version!==1||!cache.assets)throw new Error('Unsupported catalog fingerprint cache');
@@ -30,7 +31,7 @@ export async function catalogReferences(workspace,{read=readCatalogImage}={}){
 }
 const escape=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 export async function auditCatalog(workspace){
- const catalog=JSON.parse(await readFile(resolve(workspace,'public/media/catalog.json'),'utf8'));
+ const catalog=JSON.parse(await readFile(catalogPath(workspace),'utf8'));
  const refs=await catalogReferences(workspace),pairs=[];
  let distinctPairs=[];try{distinctPairs=JSON.parse(await readFile(resolve(workspace,'lib/media/stock-exclusions.json'),'utf8')).distinctPairs||[];}catch(e){if(e.code!=='ENOENT')throw e;}
  for(let i=0;i<refs.length;i++)for(let j=i+1;j<refs.length;j++){const match=sceneSimilarity(refs[i].fingerprint,refs[j].fingerprint,{creator:refs[i].creator,referenceCreator:refs[j].creator,subject:refs[i].subject,referenceSubject:refs[j].subject});if(match){const reviewed=distinctPairs.find(pair=>[pair.a,pair.b].includes(refs[i].id)&&[pair.a,pair.b].includes(refs[j].id));pairs.push({a:refs[i].id,b:refs[j].id,...match,...(reviewed?{reviewStatus:'distinct',reviewReason:reviewed.reason}:{reviewStatus:'pending'})});}}

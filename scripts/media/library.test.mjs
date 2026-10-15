@@ -26,7 +26,7 @@ test('static import prepares approved local files, skips pending entries and pre
     await writeFile(join(workspace, 'cat.png'), png);
     const candidate = { ...fixture, localFile: 'cat.png' };
     assert.equal(await importCandidates({ candidates: [candidate, { ...candidate, id: 'pending', reviewStatus: 'pending' }] }, 'static', workspace), 1);
-    const catalog = JSON.parse(await readFile(join(workspace, 'public/media/catalog.json'), 'utf8'));
+    const catalog = JSON.parse(await readFile(join(workspace, 'media-work/catalog.json'), 'utf8'));
     const asset = catalog.assets[0];
     assert.equal(asset.width, 1200); assert.equal(asset.height, 600); assert.equal(asset.captionable, true); assert.equal(asset.format, 'image');
     assert.equal(asset.localFile, undefined);

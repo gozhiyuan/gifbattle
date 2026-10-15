@@ -1,3 +1,4 @@
+import {catalogPath} from './catalog-store.mjs';
 import {readFile,writeFile,mkdir,rename} from 'node:fs/promises';
 import {resolve,dirname} from 'node:path';
 import {commonsCandidates,jsonRequest} from './library.mjs';
@@ -56,7 +57,7 @@ export async function collectHumor({path,limit=120,depth=1,maxRequests=12,roots=
 }
 export async function collectHumorCommand(options,workspace){
  const path=resolve(workspace,options.out||'media-work/commons-humor/candidates.json');
- const {assets}=JSON.parse(await readFile(resolve(workspace,'public/media/catalog.json'),'utf8'));
+ const {assets}=JSON.parse(await readFile(catalogPath(workspace),'utf8'));
  const data=await collectHumor({path,limit:Number(options.limit||120),depth:Number(options.depth||1),maxRequests:Number(options['max-requests']||12),roots:options.categories?options.categories.split(',').map(c=>c.trim().startsWith('Category:')?c.trim():'Category:'+c.trim()):HUMOR_ROOTS,exclude:[...assets,...await loadExclusions(workspace)],grow:options.grow==='true',retrySources:options['retry-sources']==='true',autoResume:options['auto-resume']==='true'});
  await writeBatchReview(path.replace(/\.json$/,'.html'),data);await save(path.replace(/\.json$/,'.summary.json'),{...batchSummary(data),humorCategoriesDiscovered:data.collection.visited.length,humorCategoriesFetched:data.collection.fetchedCategories?.length||0,remainingPages:data.collection.queue.length,blockedReason:data.collection.blockedReason||null});
  console.log(`Saved ${data.candidates.length} humor candidates. Next: batch-screen --input ${path}`);

@@ -1,3 +1,4 @@
+import {catalogPath} from './catalog-store.mjs';
 import {readFile,writeFile,mkdir,unlink} from 'node:fs/promises';
 import {resolve,dirname} from 'node:path';
 import sharp from 'sharp';
@@ -71,7 +72,7 @@ export async function exportArchive(archive,path,{limit=100000}={}){
  await mkdir(dirname(path),{recursive:true});await writeFile(path,JSON.stringify({version:1,candidates},null,2)+'\n');await writeBatchReview(path.replace(/\.json$/,'.html'),{version:1,candidates});return candidates.length;
 }
 export async function applyCatalogSafety(archive,workspace){
- const path=resolve(workspace,'public/media/catalog.json'),catalog=JSON.parse(await readFile(path,'utf8'));
+ const path=catalogPath(workspace),catalog=JSON.parse(await readFile(path,'utf8'));
  const records=new Map();for(const c of archive.entries())if(c.catalogAsset)records.set(c.catalogAsset.id,c);
  const missing=catalog.assets.filter(a=>records.get(a.id)?.aiSuggestions?.safety?.policy!==SAFETY_POLICY);
  if(missing.length)throw new Error(`${missing.length} catalog assets still need current safety assessments; catalog unchanged`);
@@ -85,7 +86,7 @@ export async function archiveCommand(command,options,workspace){
  if(command==='archive-import'){
   if(!options.input)throw new Error('Use --input candidate JSON');const data=JSON.parse(await readFile(resolve(workspace,options.input),'utf8'));for(const c of data.candidates||[])archive.upsert(c);console.log(JSON.stringify(archive.stats()));
  }else if(command==='archive-catalog'){
-  const {assets}=JSON.parse(await readFile(resolve(workspace,'public/media/catalog.json'),'utf8'));
+  const {assets}=JSON.parse(await readFile(catalogPath(workspace),'utf8'));
   for(const a of assets){const old=archive.get(a.id)||archive.getBySource(a.sourceUrl);archive.upsert({...old,...(!old?{id:a.id,sourceUrl:a.sourceUrl,source:a.id.startsWith('pexels-')?'pexels':'commons'}:{}),catalogAsset:a,creator:a.creator,reviewStatus:'approved',title:a.title,tags:a.tags,license:a.license,licenseUrl:a.licenseUrl});}console.log(`Archived ${assets.length} catalog records for safety review`);
  }else if(command==='archive-screen'){
   const result=await screenArchive(archive,workspace,{limit:Number(options.limit||1000),maxCalls:Number(options['max-calls']||1000),maxUsd:Number(options['max-usd']||5),costPerCall:Number(options['reserve-usd-per-call']||0.01),runId:options['run-id'],catalogOnly:options['catalog-only']==='true',cohort:options.cohort,concurrency:Number(options.concurrency||2)});console.log(JSON.stringify(result));

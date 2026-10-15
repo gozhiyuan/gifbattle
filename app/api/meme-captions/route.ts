@@ -16,7 +16,7 @@ export async function POST(request: NextRequest) {
     if (!isRoomPlayer(room, body.pid) || !await isValidRoomPlayerToken(body.code, body.pid, body.token)) return NextResponse.json({ error: 'forbidden' }, { status: 403 });
     const prompt = room.prompts?.[body.roundIndex];
     if (room.phase !== 'submitting' || room.submitDeadline !== body.gameId || room.submitDeadline <= Date.now() || !prompt || (room.roundPlan?.length && !room.roundPlan[body.roundIndex]?.participants?.includes(body.pid))) return NextResponse.json({ error: 'round_closed' }, { status: 409 });
-    const template = findTemplate(body.templateId);
+    const template = await findTemplate(body.templateId);
     if (!template) return NextResponse.json({ error: 'invalid_template' }, { status: 400 });
     const key = await getRoomGeminiKey(body.code);
     if (!key) return NextResponse.json({ error: 'ai_not_configured' }, { status: 400 });

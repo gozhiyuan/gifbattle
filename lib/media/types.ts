@@ -18,6 +18,7 @@ export interface MediaResult {
   license?: { label: string; url: string };
 }
 export interface SearchInput {
+  seed?: string;
   query: string;
   category?: string;
   captionable?: boolean;
@@ -26,7 +27,7 @@ export interface SearchInput {
   customerId: string;
   signal?: AbortSignal;
 }
-export interface SearchPage { items: MediaResult[]; nextCursor?: string }
+export interface SearchPage { items: MediaResult[]; nextCursor?: string; revision?: string; total?: number }
 export interface GifProvider {
   id: MediaSource;
   search(input: SearchInput): Promise<SearchPage>;

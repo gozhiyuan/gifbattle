@@ -77,3 +77,22 @@ test('catalog browsing appends bounded server pages and resets pagination on a n
   expect(calls.some(url => url.searchParams.get('cursor') === '24')).toBe(true);
   expect(calls.at(-1)?.searchParams.get('cursor')).toBeNull();
 });
+
+test('expired catalog pagination refreshes templates while preserving the caption draft and stable seed',async({page})=>{
+ const calls:URL[]=[];let initial=0;
+ await page.route('**/api/media/catalog?**',route=>{
+  const url=new URL(route.request().url());calls.push(url);
+  if(url.searchParams.has('cursor'))return route.fulfill({status:409,json:{error:'catalog_changed'}});
+  initial++;
+  return route.fulfill({json:{items:[{id:'local:refresh-test',providerId:'refresh-test',source:'local',format:'image',title:'Refresh test',previewUrl:'/powered-by-giphy.gif',displayUrl:'/powered-by-giphy.gif',captionable:true}],nextCursor:initial===1?'expired-cursor':undefined}});
+ });
+ await submissionScreen(page);
+ await expect(page.getByRole('button',{name:'Select Refresh test'})).toBeVisible();
+ const input=page.getByPlaceholder('Your answer or meme idea…');await input.fill('Keep my joke');
+ await page.getByRole('button',{name:'Load more picks',exact:true}).click();
+ await expect.poll(()=>initial).toBe(2);
+ await expect(input).toHaveValue('Keep my joke');await expect(page.getByRole('button',{name:'Select Refresh test'})).toBeVisible();
+ expect(calls.every(url=>url.searchParams.get('seed')===calls[0].searchParams.get('seed'))).toBe(true);
+ expect(calls[0].searchParams.get('seed')).toMatch(/^[a-f0-9]{16}$/);
+ expect(calls.at(-1)?.searchParams.has('cursor')).toBe(false);
+});
