@@ -215,7 +215,7 @@ A refused or malformed model answer is saved as `screeningFailure` for that imag
 
 ## Commons humor collections
 
-`collect-humor` starts from **Humor photos**, **Humorous animals** and **Humor**, rather than ordinary stock-photo searches. It reads file metadata with the official categorymembers/imageinfo API, discovers up to 20 direct subcategories per page, and walks a bounded category graph. Children are queued ahead of continued parent pages so a large root does not consume the entire budget. The depth is 0–2 (default 1), the discovered category cap is 100, and each file-metadata page has at most 20 members. Roots/subcategories can overlap; visited-category and source-ID/source-URL checks avoid cycles and repeated candidates. Published and retired source records are excluded. Category membership is a discovery hint, not a rights or quality approval.
+`collect-humor` starts from **Humor photos**, **Humorous animals** and **Humor**, rather than ordinary stock-photo searches. It reads file metadata with the official categorymembers/imageinfo API, discovers up to 500 direct subcategories per API page, and walks a bounded category graph. Queued categories are prioritized by photo/interaction relevance, with checkpointed continuation pages for resumption. The depth is 0–2 (default 1), the discovered category cap is 500, and each file-metadata page has at most 20 members. Roots/subcategories can overlap; visited-category and source-ID/source-URL checks avoid cycles and repeated candidates. Published and retired source records are excluded. Category membership is a discovery hint, not a rights or quality approval.
 
 ```sh
 npm run media -- collect-humor --limit 120 --depth 1 --max-requests 12 --out media-work/commons-humor/candidates.json
