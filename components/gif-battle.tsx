@@ -541,7 +541,7 @@ const makeStyles = (C: typeof DARK): Record<string, CSSProperties> => ({
   sub: { color:C.muted, marginBottom:24, fontSize:14, letterSpacing:0.3 },
   inp: { width:"100%", padding:"13px 16px", borderRadius:10, border:`1px solid ${C.muted}55`, background:C.card2, color:C.text, fontSize:15, marginBottom:12, outline:"none", fontFamily:FONT_BODY },
   btn: { padding:"14px 24px", borderRadius:10, border:"none", cursor:"pointer", fontSize:15, fontWeight:700, display:"block", width:"100%", marginBottom:10, fontFamily:FONT_BODY, letterSpacing:0.4 },
-  btnP: { background:C.hi, color:C.onHi },
+  btnP: { background:C.hi, color:C.onHi, border:`2px solid ${C.onHi}`, boxShadow:`4px 4px 0 ${C.accent}` },
   btnS: { background:C.card2, color:C.text, border:`1px solid ${C.muted}55` },
   btnSm: { padding:"8px 14px", borderRadius:8, border:"none", cursor:"pointer", fontSize:13, fontWeight:700, fontFamily:FONT_BODY },
   err: { color:C.accent, fontSize:13, marginBottom:12, padding:"10px 14px", background:`${C.accent}11`, borderRadius:8, border:`1px solid ${C.accent}33` },
@@ -1227,8 +1227,8 @@ function ThemeToggle() {
 function MissingGiphyConfig() {
   const { C, g } = useContext(ThemeCtx);
   return (
-    <div style={g.page}>
-      <div style={g.card}>
+    <div className="form-page" style={g.page}>
+      <div className="form-card" style={g.card}>
         <div style={g.h1}>GIF BATTLES</div>
         <div style={g.sub}>GIF search is not configured for this deployment</div>
         <div style={{background:C.card2,borderRadius:12,padding:"14px 16px",marginBottom:16,fontSize:13,lineHeight:1.9,color:C.muted,border:`1px solid ${C.muted}22`}}>
@@ -1248,14 +1248,18 @@ function MissingGiphyConfig() {
 function HomeScreen({ nick, setNick, joinIn, setJoinIn, err, setErr, onCreate, onJoin }) {
   const { C, g } = useContext(ThemeCtx);
   return (
-    <div style={g.page}>
-      <div style={{...g.card,position:"relative"}}>
+    <div className="form-page" style={{...g.page,
+      background:`radial-gradient(${C.text}1f 1px, transparent 1.6px) 0 0 / 9px 9px, linear-gradient(100deg, ${C.accent}40 0 50%, ${C.blue}40 50% 100%), ${C.bg}`}}>
+      <div className="form-card" style={{...g.card,position:"relative"}}>
         <div style={{textAlign:"center", marginBottom:28}}>
-          <div style={{fontSize:84, fontWeight:800, fontFamily:FONT_DISPLAY, letterSpacing:1, display:"inline-block",
-            color:C.text, lineHeight:0.9, marginBottom:10}}>
-            <span style={{color:C.accent}}>GIF</span> BATTLES
+          <div style={{fontSize:"clamp(56px, 16vw, 84px)", fontWeight:800, fontFamily:FONT_DISPLAY, letterSpacing:1, display:"inline-block",
+            color:C.text, lineHeight:0.9, marginBottom:14}}>
+            <span style={{color:C.accent}}>GIF</span> <span style={{color:C.blue}}>BATTLES</span>
           </div>
-          <div style={{color:C.muted, fontSize:11, letterSpacing:5, fontWeight:600}}>CREATE · VOTE · GLORY</div>
+          <div>
+            <span style={{display:"inline-block", background:C.hi, color:C.onHi, fontFamily:FONT_DISPLAY, fontWeight:800,
+              fontSize:17, letterSpacing:3, padding:"4px 12px 3px", transform:"rotate(-2deg)"}}>CREATE · VOTE · GLORY</span>
+          </div>
           <div style={{marginTop:12,color:C.muted,fontSize:13,lineHeight:1.6}}>
             A fast online party game for remote teams, coworker happy hours, and friend groups.
           </div>
@@ -1530,8 +1534,8 @@ function Lobby({ gs, pid, code, isHost, startGame, leave, writeGs }) {
   };
 
   return (
-    <div style={g.page}>
-      <div style={g.card}>
+    <div className="form-page" style={g.page}>
+      <div className="form-card" style={g.card}>
         <div style={{
           ...g.h1,
           marginBottom: 4,
@@ -1539,12 +1543,13 @@ function Lobby({ gs, pid, code, isHost, startGame, leave, writeGs }) {
           LOBBY
         </div>
         <div style={g.sub}>Share the code & wait for friends</div>
-        <div style={{background:C.card2,borderRadius:12,padding:"14px 20px",marginBottom:20,display:"flex",justifyContent:"space-between",alignItems:"center",border:`1px solid ${C.muted}33`}}>
+        <div style={{background:C.hi,color:C.onHi,borderRadius:6,padding:"14px 20px",marginBottom:20,display:"flex",justifyContent:"space-between",alignItems:"center",
+          gap:12,flexWrap:"wrap",outline:`2px dashed ${C.onHi}66`,outlineOffset:-8}}>
           <div>
-            <div style={{fontSize:10,color:C.muted,letterSpacing:3,marginBottom:4,fontWeight:600}}>ROOM CODE</div>
-            <div style={{fontSize:42,fontWeight:700,letterSpacing:8,color:C.text,fontFamily:FONT_MONO}}>{code}</div>
+            <div style={{fontSize:11,letterSpacing:3,marginBottom:4,fontWeight:700,opacity:0.7}}>ROOM CODE</div>
+            <div style={{fontSize:"clamp(32px, 9vw, 42px)",fontWeight:700,letterSpacing:6,fontFamily:FONT_MONO}}>{code}</div>
           </div>
-          <button className="gbtn" style={{...g.btnSm,background:copied?C.green:C.hi,color:copied?"#fff":C.onHi,padding:"10px 18px"}} onClick={copy}>{copied?"✓ Copied":"Copy"}</button>
+          <button className="gbtn" style={{...g.btnSm,background:copied?C.green:C.onHi,color:copied?"#fff":C.hi,padding:"10px 18px"}} onClick={copy}>{copied?"✓ Copied":"Copy"}</button>
         </div>
 
 
@@ -1626,7 +1631,7 @@ function Lobby({ gs, pid, code, isHost, startGame, leave, writeGs }) {
                   onKeyDown={e => { if (e.key === "Enter") { addPrompt(promptInput); setPromptInput(""); } }}
                 />
                 <button
-                  style={{...g.btnSm,background:C.accent,color:"#fff",whiteSpace:"nowrap"}}
+                  style={{...g.btnSm,background:C.text,color:C.bg,whiteSpace:"nowrap"}}
                   onClick={() => { addPrompt(promptInput); setPromptInput(""); }}
                 >
                   + Add
@@ -1753,9 +1758,15 @@ function Lobby({ gs, pid, code, isHost, startGame, leave, writeGs }) {
         </div>
 
         <div style={{fontSize:11,color:C.muted,letterSpacing:2,marginBottom:10}}>PLAYERS ({gs.players.length}/12)</div>
-        {gs.players.map(p=>(
+        {gs.players.map((p,i)=>(
           <div key={p.id} style={g.pRow}>
-            <span style={{fontWeight:600}}>{p.nickname}</span>
+            <span style={{...g.row,gap:10,fontWeight:600}}>
+              <span aria-hidden="true" style={{width:28,height:28,borderRadius:"50%",background:i%2===0?C.accent:C.blue,color:"#fff",
+                display:"inline-flex",alignItems:"center",justifyContent:"center",fontFamily:FONT_DISPLAY,fontWeight:800,fontSize:16,flexShrink:0}}>
+                {(p.nickname||"?").trim().charAt(0).toUpperCase()}
+              </span>
+              {p.nickname}
+            </span>
             <div style={{...g.row,gap:6}}>
               {p.id===gs.host&&<span style={{...g.badge,background:`${C.accent}22`,color:C.accent}}>HOST</span>}
               {p.id===pid&&<span style={{...g.badge,background:`${C.blue}22`,color:C.blue}}>YOU</span>}
@@ -2074,8 +2085,8 @@ function Submit({ gs, pid, code, apiKey, writeGs, fetchGs, transitioning, transi
   // Waiting screen — this player finished all their submissions
   if (isDone) {
     return (
-      <div style={g.page}>
-        <div style={g.card}>
+      <div className="form-page" style={g.page}>
+        <div className="form-card" style={g.card}>
           <div style={{marginBottom:16}}>
             <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:6}}>
               <div style={{fontSize:13,color:C.muted}}>Time remaining</div>
@@ -2386,8 +2397,8 @@ function Voting({ gs, pid, code, isHost, fetchGs, writeGs, transitioning, advanc
               </div>
               {subType === "text"
                 ? <div className="vote-gif" style={{background:`${corner}14`,
-                    display:"flex",alignItems:"center",justifyContent:"center",padding:"16px"}}>
-                    <div style={{fontSize:"clamp(17px, 2.2vw, 26px)",fontWeight:700,textAlign:"center",color:C.text,lineHeight:1.4,fontStyle:"italic"}}>
+                    display:"flex",alignItems:"center",justifyContent:"center",padding:"34px 16px 14px",overflowY:"auto"}}>
+                    <div style={{fontSize:"clamp(15px, 2.2vw, 26px)",margin:"auto 0",fontWeight:700,textAlign:"center",color:C.text,lineHeight:1.4,fontStyle:"italic"}}>
                       "{sub.textAnswer}"
                     </div>
                   </div>
@@ -2403,6 +2414,14 @@ function Voting({ gs, pid, code, isHost, fetchGs, writeGs, transitioning, advanc
                 : sub?.url
                 ? <GifImg className="vote-gif" url={sub.url} fit="contain" style={{width:"100%"}}/>
                 : <div className="vote-gif" style={{background:C.card2,display:"flex",alignItems:"center",justifyContent:"center",color:C.muted}}>No submission</div>}
+              {showRes && (isWinner || isTie) && (
+                <div style={{position:"absolute",inset:0,display:"flex",alignItems:"center",justifyContent:"center",pointerEvents:"none",zIndex:2}}>
+                  <div className="stamp" style={{background:C.hi,color:C.onHi,border:`3px solid ${C.onHi}`,fontFamily:FONT_DISPLAY,fontWeight:800,
+                    fontSize:"clamp(30px, 4vw, 52px)",letterSpacing:2,padding:"4px 16px 2px",boxShadow:`5px 5px 0 ${corner}`}}>
+                    {isTie ? "TIE" : "WINNER"}
+                  </div>
+                </div>
+              )}
               {canVote && (
                 <div style={{background:corner,color:"#fff",fontFamily:FONT_DISPLAY,fontWeight:800,fontSize:20,letterSpacing:1.5,padding:"8px 0"}}>
                   VOTE {cornerName}
@@ -2506,8 +2525,8 @@ function RoundResults({ gs, isHost, nextVotingRound, transitioning }) {
   }, [gs.votingRound]);
 
   return(
-    <div style={g.page}>
-      <div style={g.card}>
+    <div className="form-page" style={g.page}>
+      <div className="form-card" style={g.card}>
         <div style={{textAlign:"center",marginBottom:20}}>
           <div style={{fontSize:44,marginBottom:4}}>🏆</div>
           <div style={g.h2}>
@@ -2515,7 +2534,8 @@ function RoundResults({ gs, isHost, nextVotingRound, transitioning }) {
               ? `Round ${meta.cycle + 1}/${rounds} · Heat ${meta.heat + 1}/${meta.heatsInCycle} Results`
               : `Round ${(gs.votingRound ?? 0) + 1} Results`}
           </div>
-          {rWinnerNames.length>0&&<div style={{color:C.yellow,fontWeight:700,fontSize:15}}>{rWinnerNames.join(" & ")} won this round!</div>}
+          {rWinnerNames.length>0&&<div className="stamp" style={{background:C.hi,color:C.onHi,fontFamily:FONT_DISPLAY,fontWeight:800,fontSize:24,
+            letterSpacing:1,padding:"4px 14px 2px",boxShadow:`4px 4px 0 ${C.accent}`}}>{rWinnerNames.join(" & ")} won this round</div>}
         </div>
         <Scoreboard players={sorted} highlightIds={rWinners}/>
         <div style={{marginTop:16,textAlign:"center"}}>
@@ -2723,11 +2743,12 @@ function GameOver({ gs, writeGs, pid, runEndGameCleanup }) {
       <div className="game-card" style={{...g.wCard,maxWidth:1100}}>
         <div style={{textAlign:"center",marginBottom:24}}>
           <div style={{fontSize:56,marginBottom:4}}>🎊</div>
-          <div style={{fontSize:88,fontWeight:800,fontFamily:FONT_DISPLAY,letterSpacing:1,color:C.text,lineHeight:0.9,marginBottom:10}}>
+          <div style={{fontSize:"clamp(60px, 14vw, 88px)",fontWeight:800,fontFamily:FONT_DISPLAY,letterSpacing:1,color:C.text,lineHeight:0.9,marginBottom:10}}>
             GAME OVER
           </div>
-          <div style={{fontSize:20,fontWeight:700,color:C.yellow}}>
-            👑 {sorted[0]?.nickname} wins!
+          <div className="stamp" style={{background:C.hi,color:C.onHi,border:`3px solid ${C.onHi}`,fontFamily:FONT_DISPLAY,fontWeight:800,
+            fontSize:"clamp(26px, 5vw, 36px)",letterSpacing:1,padding:"6px 18px 3px",boxShadow:`5px 5px 0 ${C.accent}`}}>
+            👑 {sorted[0]?.nickname} wins
           </div>
         </div>
         <div style={{marginBottom:18}}>
