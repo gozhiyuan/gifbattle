@@ -36,3 +36,10 @@ test('automatic resume also recovers a transient connection failure',async()=>{
  const dir=await mkdtemp(join(tmpdir(),'humor-network-'));let calls=0;const original=Date.now;let now=1000;Date.now=()=>now;
  try{const result=await collectHumor({path:join(dir,'c.json'),roots:['Category:Root'],limit:10,depth:0,maxRequests:2,delayMs:0,autoResume:true,sleep:async ms=>{now+=ms;},read:async()=>{if(++calls===1)throw new TypeError('fetch failed');return {candidates:[candidate('a')],subcategories:[],continuation:null};}});assert.equal(result.candidates.length,1);assert.equal(result.collection.blockedReason,undefined);assert.equal(calls,2);}finally{Date.now=original;await rm(dir,{recursive:true});}
 });
+
+test('collection prioritizes photo categories and retains rejected source evidence for metadata audits',async()=>{
+ const dir=await mkdtemp(join(tmpdir(),'humor-audit-'));const seen=[];
+ try{const result=await collectHumor({path:join(dir,'c.json'),roots:['Category:Caricatures','Category:Humor photos'],limit:10,depth:0,maxRequests:2,delayMs:0,read:async category=>{seen.push(category);return {candidates:[{...candidate(category.includes('photos')?'photo':'art'),licenseUrl:''}],subcategories:[],continuation:null};}});
+ assert.deepEqual(seen,['Category:Humor photos','Category:Caricatures']);assert.equal(Object.keys(result.collection.rejectedCandidates).length,2);assert.equal(result.collection.rejectedCandidates.photo.candidate.sourceUrl,'https://commons.wikimedia.org/wiki/File:photo.jpg');assert.ok(result.collection.rejectedCandidates.photo.reasons.includes('missing_source_or_license_url'));
+ }finally{await rm(dir,{recursive:true,force:true});}
+});

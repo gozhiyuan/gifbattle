@@ -34,3 +34,22 @@ test('sensitive source metadata holds a candidate even if its visual model marke
  assert.equal(strictCandidate({...candidate,description:'Historical antisemitic caricature'}),null);
  assert.equal(strictCandidate({...candidate,aiSuggestions:{...candidate.aiSuggestions,captionable:false}}),null);
 });
+
+test('offline publication dry run counts image/preview/catalog uploads without calling any services',async()=>{
+ const {mkdtemp,mkdir,writeFile,rm}=await import('node:fs/promises'),{tmpdir}=await import('node:os'),{join}=await import('node:path');
+ const {publicationDryRun}=await import('./publish-shortlist.mjs');const {fingerprint}=await import('./similarity.mjs');const sharp=(await import('sharp')).default;
+ const dir=await mkdtemp(join(tmpdir(),'shortlist-plan-')),originalFetch=globalThis.fetch;globalThis.fetch=async()=>{throw Error('Dry run must be offline');};
+ try{await mkdir(join(dir,'media-work'),{recursive:true});await writeFile(join(dir,'media-work/catalog.json'),JSON.stringify({version:1,assets:[]}));
+ const fp=await fingerprint(await sharp({create:{width:32,height:32,channels:3,background:'#0088ff'}}).png().toBuffer());
+ await writeFile(join(dir,'input.json'),JSON.stringify({candidates:[{...candidate,visualFingerprint:fp}]}));const result=await publicationDryRun(join(dir,'input.json'),dir);
+ assert.equal(result.ready.length,1);assert.equal(result.operations.imageUploads,2);assert.equal(result.operations.catalogUploads,1);assert.equal(result.operations.total,3);assert.equal(result.operations.fits,false);assert.equal(result.operations.quotaStatus,'not_configured');
+ }finally{globalThis.fetch=originalFetch;await rm(dir,{recursive:true,force:true});}
+});
+
+test('real publisher refuses an unconfigured upload budget before any source or Blob requests',async()=>{
+ const {mkdtemp,mkdir,writeFile,rm}=await import('node:fs/promises'),{tmpdir}=await import('node:os'),{join}=await import('node:path');const {publishShortlist}=await import('./publish-shortlist.mjs');
+ const dir=await mkdtemp(join(tmpdir(),'shortlist-block-')),originalFetch=globalThis.fetch;let calls=0;globalThis.fetch=async()=>{calls++;throw Error('No network expected');};
+ try{await mkdir(join(dir,'media-work'),{recursive:true});await writeFile(join(dir,'media-work/catalog.json'),JSON.stringify({version:1,assets:[]}));await writeFile(join(dir,'input.json'),JSON.stringify({candidates:[candidate]}));
+ await assert.rejects(publishShortlist(join(dir,'input.json'),dir),/Stock upload budget blocked/);assert.equal(calls,0);
+ }finally{globalThis.fetch=originalFetch;await rm(dir,{recursive:true,force:true});}
+});

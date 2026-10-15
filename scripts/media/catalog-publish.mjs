@@ -1,4 +1,5 @@
 import {readFile,writeFile,mkdir,rename} from 'node:fs/promises';import {resolve,dirname,basename} from 'node:path';import {createHash} from 'node:crypto';
+import {budgetedPut} from './upload-budget.mjs';
 import {Redis} from '@upstash/redis';import {put,head} from '@vercel/blob';
 import {catalogPath,workingCatalogPath} from './catalog-store.mjs';import {storeStock} from './stock-storage.mjs';
 import {CURRENT_KEY,REVISION_PREFIX,validPointer,validateLiveCatalog,MAX_CATALOG_BYTES} from '../../lib/media/live-catalog.cjs';
@@ -6,7 +7,7 @@ async function save(path,value){await mkdir(dirname(path),{recursive:true});awai
 async function readBounded(response){if(Number(response.headers.get('content-length'))>MAX_CATALOG_BYTES)throw Error('Catalog snapshot too large');let size=0;const chunks=[];for await(const chunk of response.body){size+=chunk.length;if(size>MAX_CATALOG_BYTES)throw Error('Catalog snapshot too large');chunks.push(chunk);}return Buffer.concat(chunks);}
 export const CATALOG_SWAP_SCRIPT=`local old=redis.call('GET',KEYS[1]); local revision=''; if old then revision=cjson.decode(old).revision end; if revision~=ARGV[1] then return 0 end; if old then redis.call('SET',ARGV[3]..revision,old,'EX',604800) end; redis.call('SET',KEYS[2],ARGV[2],'EX',604800); redis.call('SET',KEYS[1],ARGV[2]); return 1;`;
 export function runtimeCatalog(catalog){return {version:1,assets:catalog.assets.map(({visualFingerprint,...asset})=>asset)};}
-export async function syncCatalog(workspace,{redis=Redis.fromEnv(),upload=put,inspect=head,fetcher=fetch,allowRemovals=false}={}){
+export async function syncCatalog(workspace,{redis=Redis.fromEnv(),upload=budgetedPut(workspace,put),inspect=head,fetcher=fetch,allowRemovals=false}={}){
  const catalog=validateLiveCatalog(runtimeCatalog(JSON.parse(await readFile(catalogPath(workspace),'utf8'))));
  const bytes=Buffer.from(JSON.stringify(catalog));if(bytes.length>MAX_CATALOG_BYTES)throw Error('Live catalog exceeds the snapshot size limit');
  const revision=createHash('sha256').update(bytes).digest('hex'),current=await redis.get(CURRENT_KEY);
@@ -29,7 +30,7 @@ export async function migrateCatalog(workspace){
  const original=JSON.parse(await readFile(catalogPath(workspace),'utf8'));const catalog=structuredClone(original);
  for(const asset of catalog.assets)for(const field of ['url','previewUrl'])if(asset[field].startsWith('/media/')){
   if(!/^\/media\/[a-zA-Z0-9_-]+\.webp$/.test(asset[field]))throw Error('Invalid local fixture path');
-  const bytes=await readFile(resolve(workspace,'public',asset[field].slice(1)));asset[field]=await storeStock('stock/'+basename(asset[field]),bytes,{put,head});
+  const bytes=await readFile(resolve(workspace,'public',asset[field].slice(1)));asset[field]=await storeStock('stock/'+basename(asset[field]),bytes,{put:budgetedPut(workspace,put),head});
  }
  validateLiveCatalog(catalog);await save(workingCatalogPath(workspace),catalog);return syncCatalog(workspace);
 }

@@ -1,5 +1,6 @@
 import {test} from 'node:test';import assert from 'node:assert/strict';
 import {mkdtemp,mkdir,writeFile,readFile,rm} from 'node:fs/promises';import {tmpdir} from 'node:os';import {join} from 'node:path';
+import {configureUploadBudget} from './upload-budget.mjs';
 import {CandidateArchive} from './archive.mjs';
 import {collectGrowth,growLibrary,growthReport} from './grow-library.mjs';
 import {growthTasks} from './growth-plan.mjs';
@@ -41,6 +42,7 @@ test('growth runner reaches published-template target and resumes without rescre
 test('growth checkpoints a throttled source without starting paid screening when it collected nothing',async()=>{
  const dir=await mkdtemp(join(tmpdir(),'growth-limit-'));let screened=0;
  try{await mkdir(join(dir,'public/media'),{recursive:true});await writeFile(join(dir,'public/media/catalog.json'),'{"version":1,"assets":[]}');
+ await configureUploadBudget(dir,{periodStart:new Date(Date.now()-1000).toISOString(),periodEnd:new Date(Date.now()+86400000).toISOString(),quota:2000,used:0,reserve:500});
  const result=await growLibrary(dir,{target:10,batchSize:10,maxUsd:1,maxCalls:10,maxBatches:1,collect:async()=>({eligible:0,added:0,requests:1,blocked:true,status:429}),screen:async()=>{screened++;throw Error('Should not screen');}});
  assert.equal(result.status,'source_limited');assert.equal(screened,0);assert.equal(result.published,0);
  const state=JSON.parse(await readFile(join(dir,'media-work/growth/state.json'),'utf8'));assert.equal(state.phase,'collect');assert.deepEqual(state.runs,[]);
@@ -54,4 +56,12 @@ test('model attempt limits apply across growth batches, not independently per ba
  const result=await growLibrary(dir,{target:2,batchSize:10,maxUsd:1,maxCalls:1,maxBatches:2,gallery:async()=>{},collect:async(a,{cohort})=>{collections++;a.upsert({...c('one'),archiveCohort:cohort});return {eligible:1};},screen:async(a,_w,{runId})=>{const attempt=a.reserve(runId,'one');a.completeAttempt(attempt,'success');a.finish(runId,'complete');return {runId,evaluated:1,run:a.run(runId)};},publish:async()=>{if(publishes++)return 0;await writeFile(join(dir,'public/media/catalog.json'),JSON.stringify({version:1,assets:[{...c('one'),primarySubject:'food',tags:['cooking'],categories:['shocked'],captionable:true,format:'image'}]}));return 1;}});
  assert.equal(result.status,'budget_limited');assert.equal(result.modelCalls,1);assert.equal(collections,1);assert.equal(result.published,1);
  }finally{await rm(dir,{recursive:true});}
+});
+
+test('growth stops before collection or paid screening when stock upload allowance is unavailable',async()=>{
+ const dir=await mkdtemp(join(tmpdir(),'growth-upload-block-'));
+ try{await mkdir(join(dir,'public/media'),{recursive:true});await writeFile(join(dir,'public/media/catalog.json'),JSON.stringify({version:1,assets:[]}));
+ const result=await growLibrary(dir,{target:2,batchSize:10,maxUsd:1,maxCalls:10,collect:async()=>{throw Error('Must not collect');},screen:async()=>{throw Error('Must not spend model quota');}});
+ assert.equal(result.status,'upload_budget_limited');assert.equal(result.modelCalls,0);
+ }finally{await rm(dir,{recursive:true,force:true});}
 });

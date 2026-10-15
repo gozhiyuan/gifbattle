@@ -5,6 +5,8 @@ import { resolve, dirname } from 'node:path';
 import { createHash } from 'node:crypto';
 import { pathToFileURL, fileURLToPath } from 'node:url';
 import sharp from 'sharp';
+import {assertUploadBudget,budgetedPut} from './upload-budget.mjs';
+import {repairCommonsMetadata} from './commons-metadata.mjs';
 import {storeStock} from './stock-storage.mjs';
 import { loadExclusions } from './stock-exclusions.mjs';
 import { safetyPassed } from '../../lib/media/safety-policy.cjs';
@@ -57,12 +59,12 @@ export function commonsCandidates(data, query) {
       const info = file.imageinfo?.[0];
       if (!info || !['image/jpeg', 'image/png', 'image/webp', 'image/gif'].includes(info.mime)) return [];
       const meta = info.extmetadata || {};
-      return [{ ...baseCandidate(identifier(file.title), query), source: 'commons',
+      return [repairCommonsMetadata({ ...baseCandidate(identifier(file.title), query), source: 'commons',
         title: file.title.replace(/^File:/, ''), description: plain(meta.ImageDescription?.value),
         sourceUrl: info.descriptionurl, creator: plain(meta.Artist?.value),
         license: plain(meta.LicenseShortName?.value), licenseUrl: licenseLink(meta.LicenseUrl?.value),
         attribution: { label: `${plain(meta.Artist?.value)} · ${plain(meta.LicenseShortName?.value)}`, url: info.descriptionurl },
-        width: info.width, height: info.height, mime: info.mime, downloadUrl: info.url, thumbnailUrl: info.thumburl || info.url }];
+        width: info.width, height: info.height, mime: info.mime, downloadUrl: info.url, thumbnailUrl: info.thumburl || info.url, sourceMetadata: {fileTitle:file.title,pageId:file.pageid,licenseShortName:plain(meta.LicenseShortName?.value),licenseUrl:licenseLink(meta.LicenseUrl?.value),artist:plain(meta.Artist?.value),credit:plain(meta.Credit?.value),license:plain(meta.License?.value),usageTerms:plain(meta.UsageTerms?.value)} })];
     });
 }
 
@@ -145,6 +147,7 @@ export async function importCandidates(input, storage = 'static', workspace = RO
   if(input.candidates.some(c=>c.reviewStatus==='approved' && !safetyPassed(c)))throw new Error('Approved stock needs a current safe family/work assessment before import');
   const exclusions = await loadExclusions(workspace);
   if(approved.some(asset=>exclusions.some(excluded=>excluded.id===asset.id||excluded.sourceUrl===asset.sourceUrl))) throw new Error('Import includes retired repetitive stock; use a different asset');
+  if(storage==='blob')await assertUploadBudget(workspace,approved.length*2+(sync?1:0));
   const additions = [];
   for (const asset of approved) {
     const candidate = input.candidates.find(c => c.id === asset.id);
@@ -155,7 +158,7 @@ export async function importCandidates(input, storage = 'static', workspace = RO
       const name = `${asset.id}-${hash}${suffix}.webp`;
       if (storage === 'blob') {
         const { put,head } = await import('@vercel/blob');
-        return storeStock(`stock/${name}`,bytes,{put,head});
+        return storeStock(`stock/${name}`,bytes,{put:budgetedPut(workspace,put),head});
       }
       const path = resolve(workspace, 'public/media', name);
       await writeFile(path, bytes, { flag: 'wx' });
@@ -184,7 +187,11 @@ async function main() {
     if (!args[i].startsWith('--') || !args[i + 1]) throw new Error('Use --option value pairs');
     options[args[i].slice(2)] = args[i + 1];
   }
-  if(command?.startsWith('catalog-')){const {catalogCommand}=await import('./catalog-publish.mjs');await catalogCommand(command,options,ROOT);
+  if(options['dry-run']!==undefined&&options['dry-run']!=='true'&&options['dry-run']!=='false')throw Error('Use --dry-run true|false');
+  if(options['dry-run']==='true'&&command!=='publish-shortlist')throw Error('Dry run is supported by publish-shortlist; no operation was performed');
+  if(command==='commons-prepare'){const {prepareCommons}=await import('./commons-prepare.mjs');await prepareCommons(ROOT,options);
+  } else if(command==='upload-budget'){const {budgetCommand}=await import('./upload-budget.mjs');await budgetCommand(options,ROOT);
+  } else if(command?.startsWith('catalog-')){const {catalogCommand}=await import('./catalog-publish.mjs');await catalogCommand(command,options,ROOT);
   } else if(command==='growth-status'){const {growthStatus}=await import('./grow-library.mjs');const result=await growthStatus(ROOT,options.state);console.log(JSON.stringify({...result,queries:Object.keys(result.queries).length},null,2));
   } else if(command==='grow-library'){const {growthCommand}=await import('./grow-library.mjs');await growthCommand(options,ROOT);
   } else if(command==='pilot-collect'){const {pilotCommand}=await import('./pilot.mjs');await pilotCommand(options,ROOT);
@@ -206,7 +213,8 @@ async function main() {
     console.log(`Saved ${candidates.length} pending candidates to ${path} and companion HTML review.`);
   } else if (command === 'publish-shortlist') {
     if (!options.input) throw new Error('Use --input reviewed/screened candidate JSON');
-    const { publishShortlist } = await import('./publish-shortlist.mjs');
+    const { publishShortlist,publicationDryRun } = await import('./publish-shortlist.mjs');
+    if(options['dry-run']==='true'){console.log(JSON.stringify(await publicationDryRun(resolve(ROOT,options.input),ROOT,{minimum:Number(options['min-score']||80),limit:Number(options.limit||50),maxSubjectShare:Number(options['max-subject-share']||0.25),sources:(options.sources||'commons,pexels,met,flickr').split(',')}),null,2));return;}
     await publishShortlist(resolve(ROOT, options.input), ROOT, { storage: options.storage || 'blob', minimum: Number(options['min-score'] || 80), maxSubjectShare: Number(options['max-subject-share'] || 0.25), limit: Number(options.limit || 50), sources: (options.sources || 'commons,pexels,met,flickr').split(',') });
   } else if (command === 'batch-collect' || command === 'batch-screen' || command === 'batch-import') {
     const { batchCommand } = await import('./batch.mjs');
@@ -263,7 +271,7 @@ async function main() {
     }
     console.log(`Catalog valid: ${catalog.assets.length} assets. External Blob availability is checked by deployment/playtest.`);
   } else {
-    console.log('Commands: collect-humor --limit 120 --depth 1 --max-requests 12 --out media-work/commons-humor/candidates.json\ngallery\naudit-similarity\nbatch-collect --sources commons,pexels --per-category 50 --out media-work/stock-diverse/candidates.json\nbatch-screen --input media-work/stock-diverse/candidates.json --limit 20\nbatch-import --input media-work/approved.json --storage blob --limit 50\ncollect --source commons|pexels --limit 8 --out media-work/first-stock.json\ntag --input media-work/cats.json --limit 10 --out media-work/tagged.json\ngenerate --prompt \"an expressive confused cat\" --id original-cat-001\nmoderate --site https://gifbattles.com --action list|approve|reject|export|stats --id ID\nsearch --source pexels|commons --query "angry cat" --limit 20 --out media-work/cats.json\nimport --input media-work/cats.json --storage static|blob\nvalidate');
+    console.log('Commands: commons-prepare --input media-work/commons-humor-expanded/candidates.json --out media-work/commons-ready\nupload-budget --action status|configure\npublish-shortlist --input PATH --dry-run true --limit 50\ncollect-humor --limit 120 --depth 1 --max-requests 12 --out media-work/commons-humor/candidates.json\ngallery\naudit-similarity\nbatch-collect --sources commons,pexels --per-category 50 --out media-work/stock-diverse/candidates.json\nbatch-screen --input media-work/stock-diverse/candidates.json --limit 20\nbatch-import --input media-work/approved.json --storage blob --limit 50\ncollect --source commons|pexels --limit 8 --out media-work/first-stock.json\ntag --input media-work/cats.json --limit 10 --out media-work/tagged.json\ngenerate --prompt \"an expressive confused cat\" --id original-cat-001\nmoderate --site https://gifbattles.com --action list|approve|reject|export|stats --id ID\nsearch --source pexels|commons --query "angry cat" --limit 20 --out media-work/cats.json\nimport --input media-work/cats.json --storage static|blob\nvalidate');
   }
 }
 if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href) main().catch(error => { console.error(error.message + (error.httpStatus ? ` (HTTP ${error.httpStatus})` : '')); process.exitCode = 1; });

@@ -224,3 +224,9 @@ Make a Meme supports editable AI suggestions using the host's Gemini key, and an
 ### Question answer modes
 
 The host lobby has **Alternate GIF and Meme rounds**, enabled by default. When on, questions alternate **GIF → Meme**, repeating for longer games. When off, players get **Search GIFs** and **Create Meme** tabs for every question. The setting is stored with the room and retained for Play Again; new rooms default to alternating. Meme questions combine text answers, captioned stock templates and optional AI tools: funnier wording, caption suggestions, or direct meme-image generation. Manual text/captions need no AI key. The host's room Gemini key enables AI. Exhausted GIF quota switches the question to Meme for remaining players; earlier submissions stay intact. An empty template catalog still allows written answers inside Meme mode.
+
+### Commons queue and stock upload budget
+
+`npm run media -- commons-prepare` prepares local screening, publication and metadata-audit files in `media-work/commons-ready/`, using saved assessments and fingerprints. It makes no external calls. Humor photos and interactions rank ahead of common pets and broad art/history categories. `report.md` explains holds and the remaining metadata evidence gaps.
+
+Stock uploads now require an explicitly configured quota window and usage baseline. Check `npm run media -- upload-budget --action status`. The guard reserves 500 operations for gameplay by default and counts full images, previews, catalog snapshots and failed attempts. It does not monitor account-wide usage automatically. `npm run media -- publish-shortlist --input media-work/commons-ready/publication-candidates.json --dry-run true` reports publication eligibility and upload counts without calling external services. See [media-library.md](docs/media-library.md) for configuration and bounded screening commands.

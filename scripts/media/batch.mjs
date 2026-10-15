@@ -15,6 +15,7 @@ import { SUBJECT_IDS, inferSubject } from '../../lib/media/stock-subjects.cjs';
 const allowedCommons = /^(CC BY(?:-SA)? (?:2\.0|2\.5|3\.0|4\.0)|CC0(?: 1\.0)?|Public domain)$/;
 export function metadataScreen(candidate) {
   const reasons = [];
+  if(candidate.metadataConflict)reasons.push('source_metadata_conflict');
   const host = value => { try { return new URL(value).hostname; } catch { return ''; } };
   if (!candidate.creator?.trim() || !candidate.attribution?.label?.trim()) reasons.push('missing_credit');
   if (!safeHttps(candidate.sourceUrl) || !safeHttps(candidate.licenseUrl)) reasons.push('missing_source_or_license_url');

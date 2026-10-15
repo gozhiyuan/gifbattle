@@ -13,7 +13,12 @@ import {inferDetail,photoSeriesMatch,sceneText} from '../../lib/media/stock-dive
 import {inferSubject} from '../../lib/media/stock-subjects.cjs';
 import {writeBatchReview} from './batch-review.mjs';
 const pause=ms=>new Promise(resolve=>setTimeout(resolve,ms));
-export async function screenArchive(archive,workspace,{limit=1000,maxCalls=1000,maxUsd=5,costPerCall=0.01,runId,catalogOnly=false,cohort,retries=2,delayMs=500,concurrency=2,propose=proposeTags,read=readOriginal,sleep=pause}={}){
+export function queuedCandidates(archive,ids,limit){
+ if(!Array.isArray(ids)||ids.length>10000||new Set(ids).size!==ids.length||ids.some(id=>typeof id!=='string'||!/^[a-z0-9][a-z0-9-]{0,99}$/.test(id)))throw Error('Invalid screening queue');
+ const rows=ids.map(id=>{const c=archive.get(id);if(!c)throw Error('Queue candidate missing from archive; archive-import the screening queue first');return c;});
+ return rows.filter(c=>c.aiSuggestions?.safety?.policy!==SAFETY_POLICY&&!c.duplicateOf&&['commons','pexels','met','flickr'].includes(c.source)).slice(0,limit);
+}
+export async function screenArchive(archive,workspace,{limit=1000,maxCalls=1000,maxUsd=5,costPerCall=0.01,runId,catalogOnly=false,cohort,candidateIds,retries=2,delayMs=500,concurrency=2,propose=proposeTags,read=readOriginal,sleep=pause}={}){
  if(!Number.isInteger(limit)||limit<1||limit>10000||!Number.isInteger(retries)||retries<0||retries>3)throw new Error('Use limit 1–10000, retries 0–3');
  if(!Number.isInteger(concurrency)||concurrency<1||concurrency>4)throw new Error('Use concurrency 1–4');
  const model=process.env.GEMINI_MEDIA_MODEL||'gemini-3.5-flash-lite';
@@ -23,7 +28,7 @@ export async function screenArchive(archive,workspace,{limit=1000,maxCalls=1000,
  try {
  const refs=await catalogReferences(workspace);const blockedSources=new Set();let evaluated=0,budgetHit=false;
  const exactImages=new Map([...refs.map(r=>[r.fingerprint.exactHash,r.id]),...[...archive.entries()].filter(c=>c.visualFingerprint?.exactHash).map(c=>[c.visualFingerprint.exactHash,c.id])]);
- const pending=archive.pending(limit,{catalogOnly,cohort});let position=0,fatal;
+ const pending=candidateIds?queuedCandidates(archive,candidateIds,limit):archive.pending(limit,{catalogOnly,cohort});let position=0,fatal;
  const process=async initial=>{
   archive.heartbeat(id);const candidate=archive.get(initial.id);if(blockedSources.has(candidate.source))return;
   if(!candidate.catalogAsset&&!metadataScreen(candidate).passed){archive.upsert({...candidate,archiveHold:'source_verification_required'});return;}
@@ -89,7 +94,9 @@ export async function archiveCommand(command,options,workspace){
   const {assets}=JSON.parse(await readFile(catalogPath(workspace),'utf8'));
   for(const a of assets){const old=archive.get(a.id)||archive.getBySource(a.sourceUrl);archive.upsert({...old,...(!old?{id:a.id,sourceUrl:a.sourceUrl,source:a.id.startsWith('pexels-')?'pexels':'commons'}:{}),catalogAsset:a,creator:a.creator,reviewStatus:'approved',title:a.title,tags:a.tags,license:a.license,licenseUrl:a.licenseUrl});}console.log(`Archived ${assets.length} catalog records for safety review`);
  }else if(command==='archive-screen'){
-  const result=await screenArchive(archive,workspace,{limit:Number(options.limit||1000),maxCalls:Number(options['max-calls']||1000),maxUsd:Number(options['max-usd']||5),costPerCall:Number(options['reserve-usd-per-call']||0.01),runId:options['run-id'],catalogOnly:options['catalog-only']==='true',cohort:options.cohort,concurrency:Number(options.concurrency||2)});console.log(JSON.stringify(result));
+  const queue=options.queue?JSON.parse(await readFile(resolve(workspace,options.queue),'utf8')):null;
+  if(options.queue&&!Array.isArray(queue?.candidates))throw Error('Invalid queue file');
+  const result=await screenArchive(archive,workspace,{candidateIds:queue?.candidates?.map(c=>c.id),limit:Number(options.limit||1000),maxCalls:Number(options['max-calls']||1000),maxUsd:Number(options['max-usd']||5),costPerCall:Number(options['reserve-usd-per-call']||0.01),runId:options['run-id'],catalogOnly:options['catalog-only']==='true',cohort:options.cohort,concurrency:Number(options.concurrency||2)});console.log(JSON.stringify(result));
  }else if(command==='archive-export'){const path=resolve(workspace,options.out||'media-work/archive/candidates.json');console.log(`Exported ${await exportArchive(archive,path,{limit:Number(options.limit||100000)})} candidates to ${path}`);
  }else if(command==='archive-apply-safety')console.log(JSON.stringify(await applyCatalogSafety(archive,workspace)));
  else if(command==='archive-backup'){

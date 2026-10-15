@@ -19,3 +19,8 @@ test('safety fails closed for missing checks, uncertainty and unsafe content',()
  for(const key of SAFETY_CATEGORIES){const value=structuredClone(safe);value.checks[key]='review';assert.equal(safetyPassed({safety:value}),false);value.checks[key]='unsafe';assert.equal(normalizeSafety(value).status,'unsafe');}
  assert.equal(normalizeSafety({safeForChildren:true,safeForWork:true,checks:{}}).status,'review');
 });
+
+test('importing an old screening queue cannot replace a current safety assessment',async()=>{
+ const dir=await mkdtemp(join(tmpdir(),'archive-current-'));const a=new CandidateArchive(join(dir,'c.sqlite'));
+ try{a.upsert({...c,aiSuggestions:{model:'current',safety:safe,reactionScore:91}});a.upsert({...c,aiSuggestions:{model:'old',safety:{...safe,policy:'old-policy'},reactionScore:10}});assert.equal(a.get(c.id).aiSuggestions.model,'current');assert.equal(a.pending(10).length,0);}finally{a.close();await rm(dir,{recursive:true,force:true});}
+});

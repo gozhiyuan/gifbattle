@@ -398,3 +398,38 @@ The user raised their Gemini service cap to $20 on 2026-10-14. The active growth
 ```sh
 npm run media -- grow-library --target 10000 --batch-size 2000 --max-usd 20 --max-calls 100000
 ```
+
+
+## Commons preparation and operation budgeting
+
+Archive and queue commands require Node.js 22.13 or later. These commands prepare work locally without new source requests, Gemini calls, Redis reads or Blob uploads:
+
+```sh
+npm run media -- commons-prepare --input media-work/commons-humor-expanded/candidates.json --out media-work/commons-ready
+npm run media -- upload-budget --action status
+npm run media -- publish-shortlist --input media-work/commons-ready/publication-candidates.json --dry-run true --limit 50
+```
+
+Preparation reads the archive in read-only mode. `screening.json` contains pending candidates ordered by photo/interaction priority and category rotation; `publication-candidates.json` reuses complete current assessments; `holds.json` records policy, duplicate and metadata holds; `metadata-audit.json` records repairs and evidence gaps; `publication-plan.json` includes duplicate/diversity checks and operation estimates. All are ignored by Git. `report.md` is a readable summary.
+
+The collector now prioritizes humor photos, forced perspectives, animal situations and food/objects ahead of common pets and broad historical art. Sensitive metadata remains held. Future metadata exclusions retain per-file evidence, bounded at 10,000 records per collection with an explicit truncation indicator. Older exclusion counters overlap and do not retain file identities: the 420 missing source/license URL events cannot be reconstructed offline. Refetch those categories in a later bounded source run before claiming recovery. Exact Creative Commons names/URLs can repair missing counterparts; conflicting assertions, missing credits and ambiguous public-domain records remain held. Metadata repair never supplies visual approval or invents authorship.
+
+When a new Gemini allowance is available and a bounded screening run is authorized, first import the saved queue into the archive, then pass the same file to the runner. The queue controls execution order, and already-completed assessments are skipped before applying the limit:
+
+```sh
+npm run media -- archive-import --input media-work/commons-ready/screening.json
+# Billable: run only when the screening budget is available.
+npm run media -- archive-screen --queue media-work/commons-ready/screening.json --limit 50 --max-calls 60 --max-usd 1 --concurrency 2
+# Rebuild the publication queue from the saved results:
+npm run media -- commons-prepare
+```
+
+Permanent stock writes require a configured `media-work/upload-budget.json`. Missing, paused, invalid or expired configurations block writes; there is no automatic calendar-month reset. Obtain the actual quota-window dates and current Advanced Operations usage from Vercel, then configure them explicitly. Example syntax (replace every placeholder):
+
+```sh
+npm run media -- upload-budget --action configure --period-start ACTUAL_START_ISO --period-end ACTUAL_END_ISO --quota 2000 --used OBSERVED_USED --reserve 500
+```
+
+The remaining local stock allowance is `quota - observed usage - gameplay reserve - subsequent local attempts`. The default 500-operation reserve is configurable. Overlapping quota windows cannot lower accounted usage. The growth runner checks the upload allowance before starting another source/model batch. Each permanent `put` reserves an operation atomically before calling Blob, including failed/interrupted attempts. Offline SDK retries and multipart uploads are disabled so attempts cannot multiply silently. The publisher limits batches to fit image + preview + one catalog snapshot; direct Blob imports preflight the full requested batch. Budget errors stop publication rather than being swallowed as per-image errors. Checkpointed files can be synchronized later without rescoring.
+
+This is a conservative local accounting guard, not a Vercel account-wide spending limit. Dashboard actions, other checkouts, other projects and live gameplay can consume additional operations; reserve accordingly and refresh the observed usage baseline. Existing files may reduce actual upload needs, but dry runs budget two attempts per template. The full-image/preview estimate does not measure storage or download allowances. Only `publish-shortlist` supports `--dry-run true`; other commands reject that flag instead of silently performing writes.
