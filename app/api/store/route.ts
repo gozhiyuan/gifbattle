@@ -7,10 +7,10 @@ import {
 } from "@/lib/room-security";
 
 const redis = Redis.fromEnv();
+// Read-only. Room state is written via /api/room/state and votes via /api/vote, both of which
+// check the player's room token; nothing is written through this generic key/value route.
 const READ_PREFIXES = ["gifbattle:room:", "gifbattle:vote:", "gifbattle:hb:"];
-const WRITE_PREFIXES = ["gifbattle:vote:"];
 const isAllowedReadKey = (key: string) => READ_PREFIXES.some((prefix) => key.startsWith(prefix));
-const isAllowedWriteKey = (key: string) => WRITE_PREFIXES.some((prefix) => key.startsWith(prefix));
 const ROOM_PREFIX = "gifbattle:room:";
 
 const sanitizeRoomJson = (json: string): string => {
@@ -53,36 +53,4 @@ export async function GET(req: NextRequest) {
   // if needed to ensure the client always receives { value: string }
   const value = typeof raw === "string" ? raw : JSON.stringify(raw);
   return NextResponse.json({ value });
-}
-
-export async function POST(req: NextRequest) {
-  let body: { key?: unknown; value?: unknown };
-  try {
-    body = await req.json();
-  } catch {
-    return NextResponse.json({ error: "invalid_body" }, { status: 400 });
-  }
-  const { key, value } = body;
-  if (typeof key !== "string" || !isAllowedWriteKey(key)) {
-    return NextResponse.json({ error: "forbidden" }, { status: 403 });
-  }
-  if (typeof value !== "string") {
-    return NextResponse.json({ error: "invalid_value" }, { status: 400 });
-  }
-  await redis.set(key, value, { ex: 86400 }); // auto-expire after 24h
-  return NextResponse.json({ ok: true });
-}
-
-export async function DELETE(req: NextRequest) {
-  const key = req.nextUrl.searchParams.get("key");
-  const prefix = req.nextUrl.searchParams.get("prefix");
-  if (prefix) {
-    return NextResponse.json({ error: "prefix_delete_disabled" }, { status: 403 });
-  }
-  if (!key) {
-    return NextResponse.json({ error: "invalid_request" }, { status: 400 });
-  }
-  if (!isAllowedWriteKey(key)) return NextResponse.json({ error: "forbidden" }, { status: 403 });
-  await redis.del(key);
-  return NextResponse.json({ ok: true });
 }

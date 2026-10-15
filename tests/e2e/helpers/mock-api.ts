@@ -1,4 +1,5 @@
 import type { BrowserContext, Request, Route } from "@playwright/test";
+import { voteKey, voteRejection } from "../../../lib/votes";
 
 const STORE_PATH = "/api/store";
 const GEMINI_KEY_PATH = "/api/gemini-key";
@@ -12,13 +13,6 @@ const json = async (route: Route, status: number, body: unknown) => {
     contentType: "application/json",
     body: JSON.stringify(body),
   });
-};
-
-const parseStoreBody = (request: Request): { key: string; value: string } => {
-  const raw = request.postDataJSON() as { key?: unknown; value?: unknown };
-  const key = typeof raw?.key === "string" ? raw.key : "";
-  const value = typeof raw?.value === "string" ? raw.value : "";
-  return { key, value };
 };
 
 const handleStoreRequest = async (
@@ -36,22 +30,7 @@ const handleStoreRequest = async (
     return json(route, 200, value == null ? null : { value });
   }
 
-  if (method === "POST") {
-    const { key, value } = parseStoreBody(request);
-    if (!key) return json(route, 400, { error: "invalid_request" });
-    store.set(key, value);
-    return json(route, 200, { ok: true });
-  }
-
-  if (method === "DELETE") {
-    if (reqUrl.searchParams.has("prefix")) {
-      return json(route, 403, { error: "prefix_delete_disabled" });
-    }
-    const key = reqUrl.searchParams.get("key");
-    if (key) store.delete(key);
-    return json(route, 200, { ok: true });
-  }
-
+  // The real /api/store is read-only; votes go through /api/vote
   return json(route, 405, { error: "method_not_allowed" });
 };
 
@@ -59,6 +38,21 @@ const handleStoreRequest = async (
 const hasRoomToken = (roomTokens: Map<string, string>, code: unknown, pid: unknown, token: unknown) =>
   typeof code === "string" && typeof pid === "string" && typeof token === "string" && !!token &&
   roomTokens.get(`${code.trim().toUpperCase()}:${pid}`) === token;
+
+const handleVoteRequest = async (route: Route, request: Request, store: Map<string, string>, roomTokens: Map<string, string>) => {
+  if (request.method() !== "POST") return json(route, 405, { error: "method_not_allowed" });
+  const body = request.postDataJSON() as { code?: string; pid?: string; token?: string; round?: number; matchup?: number; side?: string };
+  const code = typeof body?.code === "string" ? body.code.trim().toUpperCase() : "";
+  if (!hasRoomToken(roomTokens, code, body?.pid, body?.token)) return json(route, 403, { error: "forbidden" });
+  const raw = store.get(`gifbattle:room:${code}`);
+  const room = raw ? JSON.parse(raw) : null;
+  const rejection = voteRejection(room, body.pid!, body.round, body.matchup, body.side, Date.now());
+  if (rejection) return json(route, rejection === "invalid_request" ? 400 : rejection === "not_eligible" ? 403 : 409, { error: rejection });
+  const key = voteKey(code, body.round!, body.matchup!, body.pid!);
+  if (store.has(key) && store.get(key) !== body.side) return json(route, 409, { error: "already_voted" });
+  store.set(key, body.side!);
+  return json(route, 200, { ok: true });
+};
 
 const handleGeminiKeyRequest = async (route: Route, request: Request, roomTokens: Map<string, string>) => {
   if (request.method() === "GET") {
@@ -236,6 +230,7 @@ export const installGameApiMocks = async (
   await context.route(`**${STORE_PATH}**`, (route, request) =>
     handleStoreRequest(route, request, store)
   );
+  await context.route("**/api/vote", (route, request) => handleVoteRequest(route, request, store, roomTokens));
   await context.route(`**${GEMINI_KEY_PATH}**`, (route, request) =>
     handleGeminiKeyRequest(route, request, roomTokens)
   );

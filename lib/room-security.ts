@@ -19,6 +19,7 @@ export type RoomState = {
   votingRound?: number;
   currentMatchup?: number;
   matchups?: string[][];
+  voteDeadline?: number | null;
   code?: string;
   host?: string;
   createdAt?: number;
@@ -187,6 +188,19 @@ export async function authorizeRoomPlayer(
   if (!(opts.host ? isRoomHost(room, pid) : isRoomPlayer(room, pid))) return null;
   if (!(await isValidRoomPlayerToken(code, pid, token))) return null;
   return room;
+}
+
+// One vote per player per matchup: the first write wins (SET NX). Re-sending the same vote is fine.
+export async function recordRoomVote(key: string, side: string): Promise<"ok" | "conflict"> {
+  try {
+    const set = await redis.set(key, side, { nx: true, ex: 86400 });
+    if (set === "OK") return "ok";
+    const existing = await redis.get(key);
+    return existing === side ? "ok" : "conflict";
+  } catch (error) {
+    logRedisError("record_room_vote", { key }, error);
+    throw error;
+  }
 }
 
 const secondsUntilReset = (nowMs: number, windowMs: number) =>

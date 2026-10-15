@@ -474,24 +474,12 @@ const rKey = c => `gifbattle:room:${c}`;
 const vKey = (c, round, mi, pid) => `gifbattle:vote:${c}:${round}:${mi}:${pid}`;
 const hbKey = c => `gifbattle:hb:${c}`;
 
-// ── KV storage shim — calls /api/store instead of window.storage ──────────────
+// ── KV storage shim — read-only view of /api/store (writes go through token-checked routes) ──
 const storage = {
   get: async (key: string) => {
     const r = await fetch(`/api/store?key=${encodeURIComponent(key)}`);
     if (!r.ok) throw new Error(`store_read_failed:${r.status}`);
     return r.json(); // { value: string } | null
-  },
-  set: async (key: string, value: string) => {
-    const r = await fetch("/api/store", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ key, value }),
-    });
-    if (!r.ok) throw new Error(`store_set_failed:${r.status}`);
-  },
-  del: async (key: string) => {
-    const r = await fetch(`/api/store?key=${encodeURIComponent(key)}`, { method: "DELETE" });
-    if (!r.ok) throw new Error(`store_del_failed:${r.status}`);
   },
 };
 
@@ -2335,7 +2323,20 @@ function Voting({ gs, pid, code, isHost, fetchGs, writeGs, transitioning, advanc
 
   const vote=async(side)=>{
     if(!canVote)return;
-    await storage.set(vKey(code, gs.votingRound, mi, pid), side);
+    let res: Response;
+    try {
+      res = await fetch("/api/vote", { method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ code, pid, token: getRoomToken(code), round: gs.votingRound, matchup: mi, side }) });
+    } catch { return; }
+    if (!res.ok) {
+      // already_voted means this player's vote is on record (e.g. from another tab); show it as cast
+      const data = await res.json().catch(() => ({}));
+      if (data?.error === "already_voted") {
+        const existing = await storage.get(vKey(code, gs.votingRound, mi, pid)).catch(() => null);
+        if (existing?.value) setMyVote(existing.value);
+      }
+      return;
+    }
     setMyVote(side);
     const sub = gs.submissions?.[side === "left" ? lId : rId]?.[gs.votingRound];
     if (sub?.source === "local" && sub.assetId?.startsWith("local:")) recordStockEvent({ code, pid, token: getRoomToken(code), gameId: gs.submitDeadline, roundIndex: gs.votingRound, matchup: mi }, "voted", [sub.assetId.slice(6)]);

@@ -14,7 +14,8 @@
 | File | Purpose |
 |---|---|
 | `components/gif-battle.tsx` | All game logic and UI (single file) |
-| `app/api/store/route.ts` | Thin KV wrapper over Upstash Redis |
+| `app/api/store/route.ts` | Read-only KV view over Upstash Redis (room, vote, heartbeat keys) |
+| `app/api/vote/route.ts` | Token-checked vote writes (one vote per player per matchup) |
 | `app/page.tsx` | Entry point — just renders `<GifBattle />` |
 | `lib/room-security.ts` | Server-side auth helpers, rate limiting, Gemini key storage |
 | `lib/gemini-retry.ts` | Fetch wrapper with exponential backoff for Gemini API |
@@ -29,9 +30,10 @@ The game uses a polling model (every 2s) — no WebSockets. All players read/wri
 
 The `storage` shim in `gif-battle.tsx` replaces the `window.storage` API from the Claude.ai sandbox:
 - `storage.get(key)` → `GET /api/store?key=...` → returns `{ value: string } | null`
-- `storage.set(key, value)` → `POST /api/store` with `{ key, value }`
 
-`/api/store` enforces an `ALLOWED_PREFIXES` allowlist (`gifbattle:room:`, `gifbattle:vote:`, `gifbattle:hb:`). The Gemini key namespace (`gifbattle:gemini:`) is intentionally excluded — Gemini keys are managed exclusively via `/api/gemini-key` with host authentication.
+`/api/store` is read-only. Writes go through routes that check the player's secret room token (issued at create/join, sent as `token`): room state via `/api/room/state`, votes via `/api/vote`. Player IDs are readable by anyone with the room code, so never authorize on `pid` alone — use `authorizeRoomPlayer` in `lib/room-security.ts`.
+
+`/api/store` reads are limited to the `gifbattle:room:`, `gifbattle:vote:` and `gifbattle:hb:` prefixes. The Gemini key namespace (`gifbattle:gemini:`) is intentionally excluded — Gemini keys are managed exclusively via `/api/gemini-key` with host authentication.
 
 Submissions have three types (`type: "giphy" | "text" | "ai"`). AI submissions are stored as Vercel Blob URLs and cleaned up at game end.
 
