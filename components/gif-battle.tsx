@@ -1246,7 +1246,7 @@ function HomeScreen({ nick, setNick, joinIn, setJoinIn, err, setErr, onCreate, o
         </div>
 
         <div role="note" aria-label="Beta availability" style={{marginBottom:16,padding:"12px 14px",borderRadius:10,background:C.card2,border:`1px solid ${C.muted}22`,fontSize:12,lineHeight:1.6,color:C.muted}}>
-          <strong style={{color:C.text}}>Public beta</strong> · We’re still testing and improving the game. GIF search has limited quotas; if both providers reach their limits, the affected question switches to Meme mode. Keep playing by creating your own captioned meme or submitting a text answer. AI tools are optional and require the host to enable them.
+          <strong style={{color:C.text}}>Public beta</strong> · We’re still testing and improving the game. Find a funny GIF, create a captioned meme, or write your own answer. AI tools are optional and require the host to enable them.
         </div>
         {err && <div style={g.err}>⚠ {err}</div>}
         <input style={g.inp} placeholder="Your nickname" value={nick} maxLength={20}
@@ -1629,7 +1629,7 @@ function Lobby({ gs, pid, code, isHost, startGame, leave, writeGs }) {
                   >
                     Google AI Studio
                   </a>
-                  . The key is room-scoped, not shown to other players, and is auto-cleared at game over.
+                  . Your key is not shown to other players and is used for AI features in this room.
                 </div>
                 {!editingKey ? (
                   <div style={{display:"flex",alignItems:"center",gap:8}}>
