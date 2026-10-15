@@ -2118,8 +2118,8 @@ function Submit({ gs, pid, code, apiKey, writeGs, fetchGs, transitioning, transi
 
   // Active submission screen
   return (
-    <div style={g.pageTop}>
-      <div style={{...g.wCard,marginTop:20}}>
+    <div className="game-page" style={g.pageTop}>
+      <div className="game-card" style={{...g.wCard,maxWidth:960}}>
         <div style={{marginBottom:10}}>
           <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:6}}>
             <div style={{fontSize:13,color:C.muted}}>
@@ -2173,7 +2173,7 @@ function Submit({ gs, pid, code, apiKey, writeGs, fetchGs, transitioning, transi
               onClick={() => void doSearch(query)}>{searching ? "Searching…" : "Search"}</button>
             <div style={{fontSize:12,color:C.muted,marginBottom:8}}>Searching {providerLabels[provider]}{searchedQuery ? ` · Results for “${searchedQuery}”` : ""}</div>
             {gifs.length > 0 && (
-              <div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:6,maxHeight:300,overflowY:"auto",marginBottom:12}}>
+              <div className="media-grid" style={{display:"grid",gap:6,maxHeight:"min(52vh, 520px)",overflowY:"auto",marginBottom:12}}>
                 {gifs.map(gif => (
                   <div key={gif.id} onClick={() => setSel(gif)}
                     style={{position:"relative",paddingBottom:"100%",borderRadius:8,overflow:"hidden",cursor:"pointer",
@@ -2371,33 +2371,45 @@ function Voting({ gs, pid, code, isHost, fetchGs, writeGs, transitioning, advanc
     const voteCount=side==="left"?lv:rv;
     const subType = sub?.type || (sub?.url ? "giphy" : null);
     return(
-      <div className="gif-vote-card" style={{display:"flex",flexDirection:"column",alignItems:"center",gap:10}}>
-        <div style={{borderRadius:12,overflow:"hidden",width:"100%",position:"relative",
-          border:showRes?isWinner?`3px solid ${C.green}`:isTie?`3px solid ${C.yellow}`:"3px solid transparent"
-            :myVoteThis?`3px solid ${C.accent}`:"3px solid transparent",
-          boxShadow:showRes&&isWinner?`0 0 24px ${C.green}55`:myVoteThis?`0 0 16px ${C.accent}44`:"none",
-          transition:"border-color 0.2s, box-shadow 0.2s"}}>
-          {subType === "text"
-            ? <div className="vote-gif" style={{height:220,background:`linear-gradient(135deg, ${C.accent}22, ${C.cyan}18)`,
-                display:"flex",alignItems:"center",justifyContent:"center",padding:"16px",
-                border:`1px solid ${C.accent}33`}}>
-                <div style={{fontSize:18,fontWeight:700,textAlign:"center",color:C.text,lineHeight:1.4,fontStyle:"italic"}}>
-                  "{sub.textAnswer}"
+      <div className="gif-vote-card" style={{display:"flex",flexDirection:"column",alignItems:"center",gap:8,minWidth:0}}>
+        {(() => {
+          const frame = (
+            <div style={{borderRadius:12,overflow:"hidden",width:"100%",position:"relative",
+              border:showRes?isWinner?`3px solid ${C.green}`:isTie?`3px solid ${C.yellow}`:"3px solid transparent"
+                :myVoteThis?`3px solid ${C.accent}`:canVote?`3px solid ${C.muted}44`:"3px solid transparent",
+              boxShadow:showRes&&isWinner?`0 0 24px ${C.green}55`:myVoteThis?`0 0 16px ${C.accent}44`:"none",
+              transition:"border-color 0.2s, box-shadow 0.2s"}}>
+              {subType === "text"
+                ? <div className="vote-gif" style={{background:`linear-gradient(135deg, ${C.accent}22, ${C.cyan}18)`,
+                    display:"flex",alignItems:"center",justifyContent:"center",padding:"16px"}}>
+                    <div style={{fontSize:"clamp(17px, 2.2vw, 26px)",fontWeight:700,textAlign:"center",color:C.text,lineHeight:1.4,fontStyle:"italic"}}>
+                      "{sub.textAnswer}"
+                    </div>
+                  </div>
+                : subType === "ai" && sub.url
+                ? <div style={{position:"relative"}}>
+                    <img src={sub.url} alt="AI generated" className="vote-gif"
+                      style={{width:"100%",objectFit:"contain",display:"block",background:C.card2}}/>
+                    <div style={{position:"absolute",top:6,right:6,background:`${C.bg}cc`,
+                      borderRadius:6,padding:"2px 6px",fontSize:10,color:C.cyan,fontWeight:700,letterSpacing:1}}>
+                      ✨ AI
+                    </div>
+                  </div>
+                : sub?.url
+                ? <GifImg className="vote-gif" url={sub.url} fit="contain" style={{width:"100%"}}/>
+                : <div className="vote-gif" style={{background:C.card2,display:"flex",alignItems:"center",justifyContent:"center",color:C.muted}}>No submission</div>}
+              {canVote && (
+                <div style={{background:C.accent,color:"#fff",fontWeight:700,fontSize:15,letterSpacing:1,padding:"10px 0"}}>
+                  {side==="left"?"← VOTE":"VOTE →"}
                 </div>
-              </div>
-            : subType === "ai" && sub.url
-            ? <div style={{position:"relative"}}>
-                <img src={sub.url} alt="AI generated" className="vote-gif"
-                  style={{width:"100%",height:220,objectFit:"cover",display:"block"}}/>
-                <div style={{position:"absolute",top:6,right:6,background:`${C.bg}cc`,
-                  borderRadius:6,padding:"2px 6px",fontSize:10,color:C.cyan,fontWeight:700,letterSpacing:1}}>
-                  ✨ AI
-                </div>
-              </div>
-            : sub?.url
-            ? <GifImg className="vote-gif" url={sub.url} style={{width:"100%",height:220}}/>
-            : <div className="vote-gif" style={{height:220,background:C.card2,display:"flex",alignItems:"center",justifyContent:"center",color:C.muted}}>No submission</div>}
-        </div>
+              )}
+            </div>
+          );
+          return canVote
+            ? <button type="button" className="vote-pick" aria-label={`Vote for the ${side} answer`}
+                style={{color:C.accent}} onClick={()=>vote(side)}>{frame}</button>
+            : frame;
+        })()}
         <MediaAttribution source={submissionSource(sub)} attribution={sub?.attribution} license={sub?.license}/>
         {subType === "ai" && sub?.textAnswer && (
           <div style={{fontSize:12,color:C.muted,textAlign:"center",fontStyle:"italic",maxWidth:"100%",
@@ -2410,11 +2422,6 @@ function Voting({ gs, pid, code, isHost, fetchGs, writeGs, transitioning, advanc
             {voteCount} {voteCount!==1?"VOTES":"VOTE"}{isWinner?" 🏆":isTie?" 🤝":""}
           </div>
         )}
-        {!showRes&&canVote&&(
-          <button className="gbtn" onClick={()=>vote(side)} style={{...g.btn,...g.btnP,marginBottom:0,fontSize:16,letterSpacing:1}}>
-            {side==="left"?"← VOTE":"VOTE →"}
-          </button>
-        )}
         {!showRes&&id===pid&&<div style={{color:C.yellow,fontSize:13,fontWeight:700,letterSpacing:1}}>★ YOUR GIF</div>}
         {!showRes&&myVoteThis&&id!==pid&&<div style={{color:C.green,fontSize:13,fontWeight:700,letterSpacing:1}}>✓ VOTED</div>}
       </div>
@@ -2422,8 +2429,8 @@ function Voting({ gs, pid, code, isHost, fetchGs, writeGs, transitioning, advanc
   };
 
   return(
-    <div style={g.pageTop}>
-      <div style={{...g.wCard,marginTop:20}}>
+    <div className="game-page" style={g.pageTop}>
+      <div className="game-card" style={{...g.wCard,maxWidth:1320}}>
         <div style={{marginBottom:10}}>
           <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:6}}>
             <div style={{fontSize:13,color:C.muted}}>
@@ -2437,10 +2444,10 @@ function Voting({ gs, pid, code, isHost, fetchGs, writeGs, transitioning, advanc
             <div style={{height:"100%",background:tc,width:`${Math.min(100,(t/vSecs)*100)}%`,transition:"width 0.4s linear",borderRadius:4}}/>
           </div>
         </div>
-        <div style={g.prompt}>"{currentPrompt}"</div>
-        <div className="vote-grid" style={{display:"grid",gap:12,alignItems:"start",marginBottom:12}}>
+        <div style={{...g.prompt,fontSize:"clamp(18px, 2vw, 26px)",padding:"10px 0 14px"}}>"{currentPrompt}"</div>
+        <div className="vote-grid" style={{display:"grid",gap:16,alignItems:"start",marginBottom:12}}>
           <GifCard sub={lSub} id={lId} side="left"/>
-          <div className="vote-vs" style={{display:"flex",alignItems:"center",justifyContent:"center",paddingTop:80,
+          <div className="vote-vs" style={{display:"flex",alignItems:"center",justifyContent:"center",alignSelf:"center",
             fontSize:38,fontFamily:"'Bebas Neue', sans-serif",letterSpacing:2,color:C.accent,
             animation:"vsPulse 1.8s ease-in-out infinite"}}>
             VS
@@ -2706,8 +2713,8 @@ function GameOver({ gs, writeGs, pid, runEndGameCleanup }) {
     });
   };
   return(
-    <div style={g.pageTop}>
-      <div style={{...g.wCard,marginTop:20}}>
+    <div className="game-page" style={g.pageTop}>
+      <div className="game-card" style={{...g.wCard,maxWidth:1100}}>
         <div style={{textAlign:"center",marginBottom:24}}>
           <div style={{fontSize:56,marginBottom:4}}>🎊</div>
           <div style={{fontSize:80,fontWeight:900,fontFamily:"'Bebas Neue', sans-serif",letterSpacing:4,
@@ -2748,7 +2755,7 @@ function GameOver({ gs, writeGs, pid, runEndGameCleanup }) {
               <div style={{fontSize:15,fontWeight:600,marginBottom:10,color:C.text,fontStyle:"italic"}}>
                 "{row.prompt || "No prompt"}"
               </div>
-              <div style={{display:"grid",gridTemplateColumns:"repeat(2,minmax(0,1fr))",gap:10}}>
+              <div className="summary-grid" style={{display:"grid",gap:10}}>
                 {row.participants.map((playerId) => {
                   const sub = subs[playerId]?.[row.idx];
                   const nick = playerNameById.get(playerId) || "Player";

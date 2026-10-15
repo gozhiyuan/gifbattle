@@ -83,11 +83,11 @@ export function LocalPicks({ onSubmit, colors, styles, captionableOnly = false, 
     </div>
     {error ? <div role="alert" style={styles.err}>{error}</div> : loading && !items.length ? <div style={styles.info}>Loading templates…</div> : !items.length ?
       <div style={styles.info}>{query || category ? 'No matching picks. Try another category or search.' : 'Meme templates are being prepared. You can still submit text only or generate an image with AI.'}</div> :
-      <div ref={grid} style={{ display: 'grid', gridTemplateColumns: 'repeat(3,1fr)', gap: 8, maxHeight: 320, overflowY: 'auto', marginBottom: 12 }}>
+      <div ref={grid} className="media-grid" style={{ display: 'grid', gap: 8, maxHeight: 'min(52vh, 520px)', overflowY: 'auto', marginBottom: 12 }}>
         {items.map(item => <button key={item.id} data-asset={item.providerId} aria-label={`Select ${item.title}`} aria-pressed={(selectedId ?? selected?.id) === item.id}
           disabled={disabled} onClick={() => { setSelected(item); onSelect?.(item); }} style={{ cursor: 'pointer', borderRadius: 8, padding: 4, background: colors.card2,
             color: colors.text, border: `2px solid ${(selectedId ?? selected?.id) === item.id ? colors.accent : 'transparent'}` }}>
-          <img src={item.previewUrl} alt={item.title} loading="lazy" style={{ display: 'block', width: '100%', height: 90, objectFit: 'contain' }} />
+          <img src={item.previewUrl} alt={item.title} loading="lazy" style={{ display: 'block', width: '100%', aspectRatio: '4 / 3', height: 'auto', objectFit: 'contain' }} />
           {!captionableOnly && <div style={{ fontSize: 11, marginTop: 4 }}>{item.title}{item.format === 'animation' ? ' · GIF' : ''}</div>}
         </button>)}
       </div>}
