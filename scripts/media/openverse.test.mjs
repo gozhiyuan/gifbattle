@@ -1,0 +1,16 @@
+import {test} from 'node:test';import assert from 'node:assert/strict';import {searchOpenverse} from './openverse.mjs';import {metadataScreen} from './batch.mjs';
+import {sourceLimiter} from './source-requests.mjs';
+// Source pacing is tested with a fake clock separately; these use fake HTTP.
+sourceLimiter.intervalMs=()=>0;sourceLimiter.statePath=null;
+test('Openverse excludes mature and nonmatching sources, independently verifies Commons metadata',async()=>{
+ const original=globalThis.fetch;
+ try{globalThis.fetch=async input=>{const url=new URL(input);if(url.hostname==='api.openverse.org'){assert.equal(url.searchParams.get('mature'),'false');assert.equal(url.searchParams.get('license'),'cc0,pdm,by,by-sa');return Response.json({results:[{id:'one',mature:false,foreign_landing_url:'https://commons.wikimedia.org/wiki/File:Funny.jpg',url:'https://upload.wikimedia.org/f.jpg',license:'cc0',width:1000,height:1000},{id:'unsafe',mature:true,foreign_landing_url:'https://example.com',url:'https://example.com/f.jpg'}]});}assert.equal(url.hostname,'commons.wikimedia.org');return Response.json({query:{pages:{1:{title:'File:Funny.jpg',imageinfo:[{url:'https://upload.wikimedia.org/f.jpg',thumburl:'https://upload.wikimedia.org/thumb/f.jpg',descriptionurl:'https://commons.wikimedia.org/wiki/File:Funny.jpg',mime:'image/jpeg',width:1000,height:1000,extmetadata:{Artist:{value:'Creator'},LicenseShortName:{value:'CC BY 4.0'},LicenseUrl:{value:'https://creativecommons.org/licenses/by/4.0/'}}}]}}}});};const c=await searchOpenverse('funny',10);assert.equal(c.length,1);assert.equal(c[0].license,'CC BY 4.0');assert.equal(c[0].source,'commons');assert.equal(metadataScreen(c[0]).passed,true);}finally{globalThis.fetch=original;}
+});
+test('unsupported providers remain metadata-only, and Flickr permission failures do not trigger downloads',async()=>{
+ const original=globalThis.fetch;let calls=0;
+ try{globalThis.fetch=async input=>{calls++;const url=new URL(input);if(url.hostname==='api.openverse.org')return Response.json({results:[{id:'one',mature:false,foreign_landing_url:'https://www.flickr.com/photos/user/123/',url:'https://live.staticflickr.com/1/123_abcd_b.jpg',license:'by',license_version:'2.0',creator:'Creator',width:1000,height:1000}]});assert.equal(url.hostname,'www.flickr.com');return new Response('',{status:403});};const c=await searchOpenverse('funny',10);assert.equal(c[0].sourceVerification.status,'pending');assert.equal(metadataScreen(c[0]).passed,false);assert.equal(calls,2);}finally{globalThis.fetch=original;}
+});
+test('Flickr verification requires a matching photo ID and license evidence from its original page',async()=>{
+ const original=globalThis.fetch;
+ try{globalThis.fetch=async input=>{const url=new URL(input);if(url.hostname==='api.openverse.org')return Response.json({results:[{id:'one',mature:false,foreign_landing_url:'https://www.flickr.com/photos/user/123/',url:'https://live.staticflickr.com/1/123_abcd_b.jpg',license:'by',license_version:'2.0',creator:'Creator',width:1000,height:1000}]});return new Response('<h1>123</h1><a rel="license" href="https://creativecommons.org/licenses/by/2.0/">CC BY</a>');};const c=await searchOpenverse('funny',10);assert.equal(c[0].source,'flickr');assert.equal(c[0].id,'flickr-123');assert.equal(metadataScreen(c[0]).passed,true);}finally{globalThis.fetch=original;}
+});

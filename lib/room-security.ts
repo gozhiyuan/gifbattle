@@ -9,13 +9,25 @@ const CREDENTIAL_TTL_SECS = 86400;
 type RoomPlayer = { id: string; nickname?: string };
 
 export type RoomState = {
+  phase?: string;
+  submitDeadline?: number;
+  prompts?: string[];
+  roundPlan?: { participants?: string[]; cycle?: number; answerMode?: string }[];
+  answerModePolicy?: string;
+  alternateModes?: boolean;
+  answerModeOverrides?: Record<string, 'meme' | 'write'>;
+  votingRound?: number;
+  currentMatchup?: number;
+  matchups?: string[][];
   code?: string;
   host?: string;
+  createdAt?: number;
+  hostSince?: number;
   players?: RoomPlayer[];
-  submissions?: Record<string, Array<{ type?: string; url?: string }>>;
+  submissions?: Record<string, Array<{ type?: string; url?: string; assetId?: string; source?: string }>>;
 };
 
-type RateBucket = "image" | "prompt";
+type RateBucket = "image" | "prompt" | "meme" | "caption" | "contribution" | "media-event";
 type RateLimitConfig = { perMinute: number; perHour: number };
 export type RoomRateLimitResult = {
   allowed: boolean;
@@ -37,6 +49,10 @@ const rateKey = (bucket: RateBucket, code: string, scope: "minute" | "hour", win
 const normalizeCode = (code: string) => code.trim().toUpperCase();
 const RATE_LIMITS: Record<RateBucket, RateLimitConfig> = {
   image: { perMinute: 8, perHour: 120 },
+  meme: { perMinute: 30, perHour: 300 },
+  caption: { perMinute: 12, perHour: 120 },
+  contribution: { perMinute: 12, perHour: 120 },
+  "media-event": { perMinute: 240, perHour: 3000 },
   prompt: { perMinute: 18, perHour: 240 },
 };
 // Keep some headroom below GIPHY's 100-search beta-key limit so users see a
@@ -215,9 +231,15 @@ export async function checkRoomRateLimit(
 }
 
 export async function checkGiphySearchBudget(): Promise<GiphySearchBudgetResult> {
+  return checkGifSearchBudget("giphy");
+}
+
+export async function checkGifSearchBudget(provider: "giphy" | "klipy"): Promise<GiphySearchBudgetResult> {
   try {
     const now = Date.now();
-    const key = "gifbattle:rl:giphy:global";
+    const key = `gifbattle:rl:${provider}:global`;
+    const configured = Number(provider === "giphy" ? process.env.GIPHY_SEARCH_HOURLY_BUDGET : process.env.KLIPY_SEARCH_HOURLY_BUDGET);
+    const limit = Number.isInteger(configured) && configured > 0 ? configured : GIPHY_SEARCH_HOURLY_BUDGET;
     const result = await redis.eval<[number, number, number, string], [number, number]>(
       `
         redis.call("ZREMRANGEBYSCORE", KEYS[1], "-inf", ARGV[1])
@@ -231,7 +253,7 @@ export async function checkGiphySearchBudget(): Promise<GiphySearchBudgetResult>
         return {1, 0}
       `,
       [key],
-      [now - HOUR_MS, now, GIPHY_SEARCH_HOURLY_BUDGET, crypto.randomUUID()]
+      [now - HOUR_MS, now, limit, crypto.randomUUID()]
     );
     if (Number(result[0]) === 1) return { allowed: true, retryAfterSec: 0 };
 
@@ -243,7 +265,7 @@ export async function checkGiphySearchBudget(): Promise<GiphySearchBudgetResult>
         : 60,
     };
   } catch (error) {
-    logRedisError("check_giphy_search_budget", {}, error);
+    logRedisError("check_gif_search_budget", { provider }, error);
     // Fail closed: an unavailable guard must not turn into a burst of direct
     // GIPHY calls that exhaust the shared key.
     return { allowed: false, retryAfterSec: 60 };
@@ -289,4 +311,19 @@ export async function checkIpRateLimit(
     logRedisError("check_ip_rate_limit", { action, ip }, error);
     return { allowed: false, retryAfterSec: 60 };
   }
+}
+
+// Aggregate only: never store raw queries or player identifiers in GIF metrics.
+// Client-reported counters are approximate product telemetry, not billing records.
+export async function recordGifMetric(code: string, gameId: number, provider: string, event: string) {
+  try {
+    const key = `gifbattle:metrics:gifs:${code}:${gameId}`;
+    if (event === "game_completed") {
+      await redis.hset(key, { game_completed: 1 });
+      console.info("gif_game_completed", { code, gameId, metrics: await redis.hgetall(key) });
+    } else {
+      await redis.hincrby(key, `${provider}:${event}`, 1);
+    }
+    await redis.expire(key, 7 * 86400);
+  } catch (error) { logRedisError("gif_metric", { code, provider, event }, error); }
 }

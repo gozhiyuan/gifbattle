@@ -59,6 +59,7 @@ room['players'] = players
 if #players == 0 then
   redis.call('DEL', KEYS[1])
   redis.call('DEL', KEYS[2])
+  redis.call('DEL', KEYS[3])
   return cjson.encode({status='ROOM_CLOSED', leftNickname=leftNickname})
 end
 local hostChanged = false
@@ -67,7 +68,9 @@ if wasHost then
   hostChanged = true
   newHostId = players[1]['id']
   room['host'] = newHostId
+  room['hostSince'] = tonumber(ARGV[5])
   redis.call('DEL', KEYS[2])
+  redis.call('DEL', KEYS[3])
 end
 redis.call('SET', KEYS[1], cjson.encode(room))
 local ttl = tonumber(ARGV[2])
@@ -108,30 +111,27 @@ export async function POST(req: NextRequest) {
 
   const key = `gifbattle:room:${c}`;
   const heartbeatKey = `gifbattle:hb:${c}`;
-  let rawResult = "";
+  let rawResult: unknown;
   try {
     rawResult = (await redis["eval"](
       LEAVE_SCRIPT,
-      [key, heartbeatKey],
+      [key, heartbeatKey, `gifbattle:hb-missing:${c}`],
       [
         playerId,
         String(ACTIVE_ROOM_TTL_SECS),
         String(LOBBY_ROOM_TTL_SECS),
         String(GAME_OVER_ROOM_TTL_SECS),
+        String(Date.now()),
       ]
-    )) as string;
+    ));
   } catch (error) {
     console.error("room_leave_eval_failed", { code: c, playerId, error });
     return NextResponse.json({ error: "leave_failed" }, { status: 500 });
   }
-  if (typeof rawResult !== "string") {
-    console.error("room_leave_eval_unexpected_result", { code: c, playerId, rawResult });
-    return NextResponse.json({ error: "leave_failed" }, { status: 500 });
-  }
-
   let result: LeaveResult;
   try {
-    result = JSON.parse(rawResult) as LeaveResult;
+    result = (typeof rawResult === 'string' ? JSON.parse(rawResult) : rawResult) as LeaveResult;
+    if (!result || typeof result !== 'object' || typeof result.status !== 'string') throw new Error('Invalid leave result');
   } catch (error) {
     console.error("room_leave_parse_failed", { code: c, playerId, rawResult, error });
     return NextResponse.json({ error: "leave_failed" }, { status: 500 });

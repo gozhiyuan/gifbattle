@@ -24,7 +24,7 @@ Game state is stored in Upstash Redis and polled every 2 seconds, so all players
 
 ## Local development
 
-**Prerequisites:** Node.js 18+, a [Giphy API key](https://developers.giphy.com) (free), and Upstash Redis credentials.
+**Prerequisites:** Node.js 20.9+ and Upstash Redis credentials for real room creation/multiplayer. GIPHY/KLIPY keys are optional for remote GIF search; a public Vercel Blob token is required for saving memes and AI images. There is no bundled local Redis server or REST proxy. The current Redis client uses the Upstash HTTP API.
 
 ```bash
 # 1. Install dependencies
@@ -38,11 +38,15 @@ cp .env.example .env.local
 npm run dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000). To test multiplayer locally, open a second tab.
+Open [http://localhost:3000](http://localhost:3000). To test multiplayer locally, use another browser or an incognito window so each player has a separate browser identity.
 
 ## Testing
 
-Baseline tests use Playwright and run against a production build:
+Tests run locally against a production build on port 3100. Browser multiplayer tests intercept room/store endpoints and use in-memory mocks; provider, Blob and Gemini interactions are also mocked where exercised. Service and media-script tests validate rendering, authorization logic and failure handling with injected dependencies. Passing these tests does not verify live service credentials. Provider-specific browser tests skip when their required provider is not configured in the build.
+
+For a real integration check, configure `.env.local`, run `npm run dev`, and play a complete game in two separate browser sessions. Test GIPHY and KLIPY as primary providers in separate runs (restart after changing `NEXT_PUBLIC_GIF_PROVIDER`), then create a meme with Blob storage enabled. Use a separate development Upstash database to keep test rooms/budgets separate from production.
+
+Run automated checks:
 
 ```bash
 # Run full baseline suite (build + smoke + e2e)
@@ -113,7 +117,11 @@ tests/
 |---|---|
 | `UPSTASH_REDIS_REST_URL` | Upstash Redis REST endpoint |
 | `UPSTASH_REDIS_REST_TOKEN` | Upstash Redis auth token |
-| `NEXT_PUBLIC_GIPHY_KEY` | Required app-level Giphy key for GIF search (users cannot override in UI) |
+| `NEXT_PUBLIC_GIPHY_KEY` | App-level GIPHY key (at least one provider key required for GIF search) |
+| `NEXT_PUBLIC_KLIPY_KEY` | Optional ad-free KLIPY v1 GIF API key |
+| `NEXT_PUBLIC_GIF_PROVIDER` | Preferred provider: `giphy` or `klipy` |
+| `NEXT_PUBLIC_GIF_AUTO_FALLBACK` | Automatic quota fallback defaults to `true`; `false` disables it |
+| `GIPHY_SEARCH_HOURLY_BUDGET` / `KLIPY_SEARCH_HOURLY_BUDGET` | Independent rolling hourly request budgets; default `85` each |
 | `NEXT_PUBLIC_SITE_URL` | Public base URL for canonical metadata, `robots.txt`, and `sitemap.xml` (for example `https://gifbattles.com`) |
 | `NEXT_PUBLIC_SENTRY_DSN` | Enables Sentry error tracking for client/server/edge runtimes |
 | `SENTRY_DSN` | Optional server-only Sentry DSN override (used by server/edge if set) |
@@ -126,8 +134,15 @@ tests/
 
 ### LLM key behavior
 
-- GIF search always uses the app-level `NEXT_PUBLIC_GIPHY_KEY`.
-- GIF searches are sent directly from the player browser, but the app reserves a site-wide rolling 60-minute budget of 85 searches in Redis before each request. When that budget is exhausted, players are directed to the text/AI-answer fallback rather than receiving a GIPHY 429.
+- GIF search uses the configured app-level GIPHY or KLIPY key. Set `NEXT_PUBLIC_KLIPY_KEY` to enable KLIPY and `NEXT_PUBLIC_GIF_PROVIDER=klipy` to make it primary. `NEXT_PUBLIC_*` configuration is baked into the client at build time; rebuild/redeploy after changes.
+- Players use one GIF search. `NEXT_PUBLIC_GIF_AUTO_FALLBACK=true` is the default: exhausted quota switches to the other configured provider and replaces the entire grid and attribution. Pagination never mixes providers. Set `false` to disable fallback.
+- KLIPY currently supports the ad-free v1 GIF API with high content filtering. Ad-enabled keys require a separate integration; ad objects are not silently discarded.
+- Search requires Search/Enter or a category click; typing and opening the screen spend no quota. Each page fetches 24 results and previews load lazily. Pagination uses the original submitted query.
+- Media submissions record their source for attribution in selection, voting, results, and exported HTML. Old GIPHY submissions remain readable.
+- Remote searches are sent directly from the player browser. `/api/gif-search-budget` reserves independent, atomic rolling 60-minute budgets in Redis. `GIPHY_SEARCH_HOURLY_BUDGET` and `KLIPY_SEARCH_HOURLY_BUDGET` default to 85. Budgets fail closed if Redis is unavailable; public API keys can still be used outside this guard.
+- KLIPY submissions send share reporting with the originating query and player ID. Reporting reserves the same API budget and is best effort; it does not prevent gameplay when quota/network is unavailable.
+- `/api/gif-events` records approximate per-room/provider counts (`search_sent`, `pagination_sent`, `search_error`, `quota_blocked`) in `gifbattle:metrics:gifs:<ROOM_CODE>:<SUBMIT_DEADLINE>` with a seven-day TTL. The host marks the game completed on the results screen, which logs `gif_game_completed` with its counters. The deadline separates repeat games in the same room. Use completed records to measure requests per completed game. No raw queries or player IDs are stored in these counters. They are client-reported analytics, not authoritative billing usage.
+- No provider media or search responses are persistently cached or rehosted.
 - Prompt generation and AI image generation use a host-provided Gemini key (BYOK) configured in the lobby.
 - Prompt generation defaults to `gemini-3.5-flash` (with `gemini-3.6-flash` selectable by the host). Image generation uses `gemini-3.1-flash-image` by default.
 - The image generation route sets `maxDuration = 60` and can spend up to ~39s total across retries (3 x 12s attempts + backoff).
@@ -144,7 +159,7 @@ Vercel Web Analytics is included through `@vercel/analytics` in the root layout.
 - Lobby room state (`phase: lobby`) expires after 30 minutes of inactivity.
 - Active game room state (`phase: submitting/voting/round_results`) uses a 4-hour TTL.
 - Game-over room state (`phase: game_over`) uses a 15-minute TTL.
-- Vote and heartbeat keys (`gifbattle:vote:*`, `gifbattle:hb:*`) also use 24-hour TTL.
+- Vote keys use a 24-hour TTL. Authenticated host heartbeats renew the active room lease and expire after twice the takeover grace period (4 minutes in a lobby, 80 seconds during play). Frozen hosts can be replaced after 2 minutes in the lobby or 40 seconds during play.
 - Room Gemini keys (`gifbattle:gemini:*`) are server-side only, cleared at game end by host, and expire after 24 hours if not cleared earlier.
 - AI image blobs are deleted at game-over via `/api/cleanup-images` (host-authenticated, room-scoped, best effort).
 - If cleanup fails, blobs remain until manually deleted by an admin workflow.
@@ -172,3 +187,40 @@ Vercel Web Analytics is included through `@vercel/analytics` in the root layout.
    - Tighten rate limits if usage spike bypassed expected thresholds.
 
 Room lobby data expires in 30 minutes if the game is not started; active game data expires in 4 hours; game-over data expires in 15 minutes.
+
+### GIF integration checks
+
+Provider mapping and routing tests use mocked responses. Browser search tests require a build with a configured primary provider; they skip if that provider is absent. To exercise the GIPHY browser cases without real calls:
+
+```bash
+NEXT_PUBLIC_GIPHY_KEY=test-giphy NEXT_PUBLIC_KLIPY_KEY=test-klipy NEXT_PUBLIC_GIF_PROVIDER=giphy NEXT_PUBLIC_GIF_AUTO_FALLBACK=false npm run build
+npx playwright test
+```
+
+To exercise KLIPY submission/reporting and attribution, build with the same dummy keys and `NEXT_PUBLIC_GIF_PROVIDER=klipy`, then run `npx playwright test tests/e2e/gif-search.spec.ts`. Rebuild with deployment credentials/configuration before using the app outside tests.
+
+### Meme templates and offline stock import
+
+Make a Meme uses approved stock templates without GIF-provider requests or keys. The separate Our Picks player tab has been removed. The same versioned catalog stores caption settings and source credits.
+
+Use `npm run media -- search --source commons --query 'cat yawning' --limit 20`, review the JSON/HTML in `media-work/`, then `npm run media -- import --input media-work/candidates.json --storage static`. Run `npm run media -- validate` before deploying. Pexels search needs the server-only `PEXELS_API_KEY`; Commons needs no key. Static files need no extra storage service. `--storage blob` reuses `BLOB_READ_WRITE_TOKEN` for permanent `stock/` assets.
+
+See [the media-library workflow](docs/media-library.md) for approval fields, manual/original imports, storage, source requirements and meme-template metadata. Search results are pending candidates; source rights must be reviewed before publishing. Make a Meme renders player-written captions using approved templates.
+
+
+### Player-created memes
+
+Make a Meme supports approved captionable templates, live Canvas previews, one/two text captions and submissions into the existing voting flow. The server renders the final image, preserves the source license, and uploads using the existing `BLOB_READ_WRITE_TOKEN`. Caption text/template IDs live in temporary Redis room state; generated images use `memes/`, separate from permanent `stock/`.
+
+Set `CRON_SECRET` in Vercel to enable the daily expired-meme cleanup configured in `vercel.json`. The host can also delete the game's memes with Play Again. Completed and abandoned uploads expire after 24 hours and are deleted on a subsequent successful cleanup run. No AI caption suggestions or permanent player contribution collection is included.
+
+Meme templates load filtered pages from `/api/media/catalog`, rather than downloading the entire manifest into the browser. See [the media workflow](docs/media-library.md) for setup, retention and testing.
+
+### AI captions, contributions and stock preparation
+
+Make a Meme supports editable AI suggestions using the host's Gemini key, and an optional sharing checkbox that queues a permanent copy for review. Offline `media collect`, `tag`, `generate` and `moderate` commands cover sourcing, AI metadata proposals, original image drafts, approval/export and exposure-aware usage stats. Configure `GEMINI_MEDIA_API_KEY` only for offline AI work and `MEDIA_ADMIN_SECRET` for moderation. Reuse the existing Blob token and Redis configuration. See [the complete stock workflow](docs/media-library.md).
+
+
+### Question answer modes
+
+The host lobby has **Alternate GIF and Meme rounds**, enabled by default. When on, questions alternate **GIF → Meme**, repeating for longer games. When off, players get **Search GIFs** and **Create Meme** tabs for every question. The setting is stored with the room and retained for Play Again; new rooms default to alternating. Meme questions combine text answers, captioned stock templates and optional AI tools: funnier wording, caption suggestions, or direct meme-image generation. Manual text/captions need no AI key. The host's room Gemini key enables AI. Exhausted GIF quota switches the question to Meme for remaining players; earlier submissions stay intact. An empty template catalog still allows written answers inside Meme mode.

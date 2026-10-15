@@ -5,8 +5,12 @@ import {
   getRoomGeminiKey,
   getRoomState,
   isRoomPlayer,
+  isValidRoomPlayerToken,
 } from "@/lib/room-security";
 import { fetchWithRetry } from "@/lib/gemini-retry";
+import {allowsAnswerMode} from '@/lib/answer-modes';
+import {findTemplate} from '@/lib/media/catalog-server';
+import {memeImagePrompt} from '@/lib/media/meme-image-prompt';
 
 export const maxDuration = 60;
 
@@ -122,6 +126,8 @@ const extractProviderImage = (payload: unknown): ProviderImageResult => {
 export async function POST(req: NextRequest) {
   let textAnswer = "", gamePrompt = "", style = "random";
   let roomCode = "", pid = "";
+  let templateId: unknown;
+  let memeImage=false,token='',gameId=0,roundIndex=-1;
   try {
     const body = await req.json();
     textAnswer = body.textAnswer ?? "";
@@ -129,6 +135,8 @@ export async function POST(req: NextRequest) {
     style = body.style ?? "random";
     roomCode = (body.roomCode ?? "").trim().toUpperCase();
     pid = body.pid ?? "";
+    templateId=body.templateId;
+    memeImage=body.memeImage===true;token=body.token||'';gameId=body.gameId;roundIndex=body.roundIndex;
   } catch {
     return NextResponse.json({ error: "invalid_request" }, { status: 400 });
   }
@@ -136,6 +144,15 @@ export async function POST(req: NextRequest) {
   if (!roomCode || !pid) return NextResponse.json({ error: "forbidden" }, { status: 403 });
   const room = await getRoomState(roomCode);
   if (!isRoomPlayer(room, pid)) return NextResponse.json({ error: "forbidden" }, { status: 403 });
+  if (memeImage) {
+    if(typeof textAnswer!=='string'||textAnswer.length>280||typeof token!=='string'||!token||token.length>200||!Number.isSafeInteger(gameId)||!Number.isInteger(roundIndex)||roundIndex<0)return NextResponse.json({error:'invalid_request'},{status:400});
+    if(!await isValidRoomPlayerToken(roomCode,pid,token))return NextResponse.json({error:'forbidden'},{status:403});
+    if(room.phase!=='submitting'||room.submitDeadline!==gameId||room.submitDeadline<=Date.now()||!Number.isInteger(roundIndex)||roundIndex<0||!room.prompts?.[roundIndex]||(room.roundPlan?.length&&!room.roundPlan[roundIndex]?.participants?.includes(pid))||room.submissions?.[pid]?.[roundIndex])return NextResponse.json({error:'round_closed'},{status:409});
+    if(!allowsAnswerMode(room,roundIndex,'meme'))return NextResponse.json({error:'wrong_answer_mode'},{status:409});
+    gamePrompt=room.prompts[roundIndex];
+  }
+  const template = memeImage && typeof templateId === 'string' ? findTemplate(templateId) : undefined;
+  if (memeImage && templateId != null && (!template || typeof templateId !== 'string')) return NextResponse.json({error:'invalid_template'},{status:400});
   const blobToken = process.env.BLOB_READ_WRITE_TOKEN;
   if (!blobToken) return NextResponse.json({ error: "storage_not_configured" }, { status: 500 });
 
@@ -154,7 +171,7 @@ export async function POST(req: NextRequest) {
     ? STYLE_PROMPTS[STYLE_KEYS[Math.floor(Math.random() * STYLE_KEYS.length)]]
     : (STYLE_PROMPTS[style] ?? STYLE_PROMPTS.anime);
 
-  const prompt = `Create a ${resolvedStyle} illustration that humorously captures this reaction:\n\nQuestion: "${gamePrompt}"\nPlayer's answer: "${textAnswer}"\n\nThe image should visually represent this answer as a funny, expressive response to the question. Make it relatable and comedic.`;
+  const prompt = memeImage ? memeImagePrompt(resolvedStyle,gamePrompt,textAnswer,template ? {title:template.title,description:template.description} : undefined) : `Create a ${resolvedStyle} illustration that humorously captures this reaction:\n\nQuestion: "${gamePrompt}"\nPlayer's answer: "${textAnswer}"\n\nThe image should visually represent this answer as a funny, expressive response to the question. Make it relatable and comedic.`;
 
   try {
     const requestImage = async (responseModalities: string[], promptText: string) =>
@@ -238,6 +255,7 @@ export async function POST(req: NextRequest) {
     const ext = mimeType.split("/")[1] ?? "png";
     const filename = `gifbattle-ai-${Date.now()}-${Math.random().toString(36).slice(2)}.${ext}`;
 
+    if(memeImage){const fresh=await getRoomState(roomCode);if(!isRoomPlayer(fresh,pid)||fresh.phase!=='submitting'||fresh.submitDeadline!==gameId||fresh.submitDeadline<=Date.now()||fresh.submissions?.[pid]?.[roundIndex]||!allowsAnswerMode(fresh,roundIndex,'meme'))return NextResponse.json({error:'round_closed'},{status:409});}
     let blob;
     try {
       blob = await put(filename, buffer, {

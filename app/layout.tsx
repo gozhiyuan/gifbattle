@@ -11,7 +11,7 @@ export const metadata: Metadata = {
     template: "%s | GIF Battles",
   },
   description:
-    "GIF Battles is a free online party game for coworkers and friends. Create a room, submit funny GIFs, and vote head-to-head in minutes.",
+    "GIF Battles is a free online party game for coworkers and friends. Create a room, find funny GIFs or create your own memes, and vote head-to-head.",
   keywords: [
     "virtual team building game",
     "remote happy hour game",
@@ -19,6 +19,8 @@ export const metadata: Metadata = {
     "online party game",
     "zoom game",
     "gif game",
+    "meme party game",
+    "create your own meme",
     "multiplayer browser game",
   ],
   applicationName: "GIF Battles",
@@ -31,7 +33,7 @@ export const metadata: Metadata = {
     siteName: "GIF Battles",
     title: "GIF Battles | Virtual Team Building Game for Remote Happy Hours",
     description:
-      "A fast online party game for remote teams, coworker happy hours, and friends: join a room, pick GIF answers, and vote for the funniest one.",
+      "A fast online party game for remote teams, coworker happy hours, and friends: find funny GIFs, create your own memes, and vote for the funniest answer.",
     images: [
       {
         url: "/opengraph-image",
@@ -45,7 +47,7 @@ export const metadata: Metadata = {
     card: "summary_large_image",
     title: "GIF Battles | Virtual Team Building Game",
     description:
-      "Free remote happy hour game for coworkers and friends. Join a room, pick funny GIFs, and vote through bracket matchups.",
+      "Free remote happy hour game for coworkers and friends. Join a room, find funny GIFs or create your own memes, and vote for the funniest answer.",
     images: ["/twitter-image"],
   },
   robots: {

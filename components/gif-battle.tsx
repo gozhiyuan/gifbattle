@@ -2,13 +2,24 @@
 
 import React, { useState, useEffect, useRef, useCallback, useContext, CSSProperties } from "react";
 
+import { recordStockEvent } from "@/lib/media/stock-metrics";
+import { MemeEditor, CreatedMeme } from "./meme-editor";
+import { LocalPicks } from "./local-picks";
+import { MediaCredit } from "./media-credit";
+import { safeHttps } from "@/lib/media/catalog-schema.cjs";
+
+import { hostGraceMs, heartbeatIsFresh } from "@/lib/host-presence";
+import { ANSWER_MODE_POLICY, CHOICE_MODE_POLICY, getAnswerMode, modeForCycle, answerModeLabels, isChoiceMode, submissionAllowedForQuestion } from "@/lib/answer-modes";
+import { MediaResult, RemoteProvider, ProviderError } from "@/lib/media/types";
+import { enabledProviders, primaryProvider, providerLabels } from "@/lib/media/provider-config";
+import { searchMedia, reportMediaSelection } from "@/lib/media/search";
+
 const POLL_MS = 2000;
 const DEFAULT_ROUNDS = 3;    // prompts each player submits for
 const DEFAULT_NAME_PROMPT_ROUNDS = 1;
 const VOTE_SECS = 12;        // seconds per voting matchup
 const SUBMIT_SECS = 60;      // seconds per GIF question (total = SUBMIT_SECS * rounds)
 const RESULTS_SECS = 5;      // seconds to show round results before auto-advancing
-const HOST_STALE_MS = 40000; // allow more background-tab delay before host takeover
 const NOTICE_MS = 5000;
 
 const PROMPTS = [
@@ -368,7 +379,7 @@ const buildPromptsForPlan = (
 };
 
 const buildRoundPlan = (playerIds: string[], rounds: number, maxCompetitors: number) => {
-  const plan: Array<{ participants: string[]; cycle: number; heat: number; heatsInCycle: number }> = [];
+  const plan: Array<{ participants: string[]; cycle: number; heat: number; heatsInCycle: number; answerMode: string }> = [];
   const cap = Math.max(2, getEligibleCompetitors(playerIds.length, maxCompetitors));
   const baseOrder = [...playerIds].sort(() => Math.random() - 0.5);
   const rotate = <T,>(arr: T[], shift: number) => {
@@ -388,7 +399,7 @@ const buildRoundPlan = (playerIds: string[], rounds: number, maxCompetitors: num
 
     const heatsInCycle = valid.length;
     valid.forEach((participants, heat) => {
-      plan.push({ participants, cycle, heat, heatsInCycle });
+      plan.push({ participants, cycle, heat, heatsInCycle, answerMode: modeForCycle(cycle, enabledProviders.length > 0) });
     });
   }
 
@@ -479,7 +490,7 @@ const clearRoomToken = (code: string) => {
 const storage = {
   get: async (key: string) => {
     const r = await fetch(`/api/store?key=${encodeURIComponent(key)}`);
-    if (!r.ok) return null;
+    if (!r.ok) throw new Error(`store_read_failed:${r.status}`);
     return r.json(); // { value: string } | null
   },
   set: async (key: string, value: string) => {
@@ -498,75 +509,18 @@ const storage = {
 
 // ── Submission type ────────────────────────────────────────────────────────────
 type Submission = {
-  type?: "giphy" | "text" | "ai";
+  type?: "giphy" | "media" | "text" | "ai" | "meme";
+  source?: "giphy" | "klipy" | "local";
+  assetId?: string;
+  templateId?: string;
+  captions?: string[];
+  mediaFormat?: "image" | "animation";
+  attribution?: MediaResult["attribution"];
+  license?: MediaResult["license"];
   url?: string;
   preview?: string;
   textAnswer?: string;
 };
-
-// ── Giphy search ───────────────────────────────────────────────────────────────
-type GifSearchResult = {
-  items: Array<{id:string,url:string,preview:string}>;
-  error: string | null;
-  rateLimited?: boolean;
-  retryAfter?: number;
-};
-
-async function reserveGiphySearch(code: string, pid: string): Promise<{ error: string | null; retryAfter?: number }> {
-  try {
-    const r = await fetch("/api/giphy-search-budget", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ code, pid }),
-    });
-    if (r.status === 429) {
-      const data = await r.json().catch(() => null);
-      const retryAfter = Number(data?.retryAfter);
-      return {
-        error: "GIF search is taking a short break for everyone. Use Write Answer or create an AI image instead.",
-        retryAfter: Number.isFinite(retryAfter) ? retryAfter : 60,
-      };
-    }
-    if (!r.ok) return { error: "GIF search is temporarily unavailable. Use Write Answer or try again shortly." };
-    return { error: null };
-  } catch {
-    return { error: "GIF search is temporarily unavailable. Use Write Answer or try again shortly." };
-  }
-}
-
-async function searchGifs(q, apiKey, code: string, pid: string, offset = 0): Promise<GifSearchResult> {
-  if (!q.trim() || !apiKey) return { items: [], error: null };
-  const permit = await reserveGiphySearch(code, pid);
-  if (permit.error) {
-    return { items: [], error: permit.error, rateLimited: true, retryAfter: permit.retryAfter };
-  }
-  try {
-    const r = await fetch(
-      `https://api.giphy.com/v1/gifs/search?api_key=${apiKey}&q=${encodeURIComponent(q)}&limit=12&offset=${offset}&rating=pg-13`
-    );
-    if (r.status === 429) {
-      return {
-        items: [],
-        error: "GIPHY's shared free search limit was reached. Use Write Answer or create an AI image instead.",
-        rateLimited: true,
-        retryAfter: 60 * 60,
-      };
-    }
-    if (!r.ok) {
-      return { items: [], error: "GIPHY search failed. Please try again." };
-    }
-    const d = await r.json();
-    const items = (d.data || []).map(g => ({
-      id: g.id,
-      url: g.images?.fixed_height?.url || "",
-      preview: g.images?.fixed_height_small?.url || g.images?.fixed_height?.url || "",
-    })).filter(g => g.url);
-    return { items, error: null };
-  } catch(e) {
-    console.error(e);
-    return { items: [], error: "Network error while searching GIPHY." };
-  }
-}
 
 // ── Styles ────────────────────────────────────────────────────────────────────
 const DARK = { bg:"#07070e", card:"#0d0d1e", card2:"#13132a", accent:"#ff2979", cyan:"#00e5ff", text:"#eaeaff", muted:"#484878", green:"#00ff88", yellow:"#ffcc00" };
@@ -618,17 +572,29 @@ function PoweredByGiphy() {
   );
 }
 
+function MediaAttribution({ source, attribution, license }: { source?: string } & Pick<MediaResult, "attribution" | "license">) {
+  if (source === "local") return <MediaCredit attribution={attribution} license={license}/>;
+  if (source === "giphy") return <PoweredByGiphy/>;
+  if (source !== "klipy") return null;
+  return <div style={{display:"flex",justifyContent:"flex-end",marginTop:8,fontSize:12}}>
+    <a href="https://klipy.com" target="_blank" rel="noreferrer">Powered by KLIPY</a>
+  </div>;
+}
+const submissionSource = (sub: Submission | undefined) => sub?.source ||
+  (sub?.type === "giphy" || (!sub?.type && sub?.url) ? "giphy" : undefined);
+
 // ── GIF image with loading/error state ────────────────────────────────────────
-function GifImg({ url, style={}, fit="cover", className="" }) {
+function GifImg({ url, style={}, fit="cover", className="", lazy=false }) {
   const { C } = useContext(ThemeCtx);
   const [ok, setOk] = useState(false);
   const [err, setErr] = useState(false);
+  useEffect(() => { setOk(false); setErr(false); }, [url]);
   return (
     <div className={className} style={{ position:"relative", background:C.card2, overflow:"hidden", ...style }}>
       {!ok && !err && <div style={{position:"absolute",inset:0,display:"flex",alignItems:"center",justifyContent:"center",color:C.muted,fontSize:12}}>Loading…</div>}
       {err && <div style={{position:"absolute",inset:0,display:"flex",alignItems:"center",justifyContent:"center",color:C.muted,fontSize:12}}>GIF unavailable</div>}
-      <img src={url} alt="" onLoad={()=>setOk(true)} onError={()=>setErr(true)}
-        style={{width:"100%",height:"100%",objectFit:fit as "cover"|"contain",display:ok?"block":"none"}} />
+      <img src={url} alt="" loading={lazy ? "lazy" : "eager"} onLoad={()=>setOk(true)} onError={()=>setErr(true)}
+        style={{width:"100%",height:"100%",objectFit:fit as "cover"|"contain",display:"block",opacity:ok?1:0}} />
     </div>
   );
 }
@@ -660,7 +626,7 @@ export default function App() {
   const C = isDark ? DARK : LIGHT;
   const g = makeStyles(C);
   const themeCtxVal = { C, g, themeMode, setThemeMode: setAndSaveTheme };
-  const envKey = typeof process !== "undefined" && process.env?.NEXT_PUBLIC_GIPHY_KEY || "";
+  const envKey = enabledProviders.length ? "configured" : "";
   const [view, setView] = useState("home");
   const [nick, setNick] = useState("");
   const [code, setCode] = useState("");
@@ -680,6 +646,7 @@ export default function App() {
   const prevGsRef = useRef<any>(null);
   const leavingRef = useRef(false);
   const lobbyMissingPollsRef = useRef(0);
+  const lastRoomReadWasMissing = useRef(false);
 
   useEffect(() => {
     try {
@@ -737,8 +704,10 @@ export default function App() {
 
   const fetchGs = useCallback(async (c?: string) => {
     const roomCode = String(c || code || "").trim().toUpperCase();
+    lastRoomReadWasMissing.current = false;
     try {
       const r = await storage.get(rKey(roomCode));
+      lastRoomReadWasMissing.current = r === null;
       if (r) {
         let s: any;
         try {
@@ -797,8 +766,10 @@ export default function App() {
         }
         return null;
       }
-      lastGsJson.current = json;
-      setGs(sanitizedState); return sanitizedState;
+      const result = await res.json();
+      const savedState = result.state || sanitizedState;
+      lastGsJson.current = JSON.stringify(savedState);
+      setGs(savedState); return savedState;
     } catch (error) {
       console.error("write_room_state_error", { roomCode, error });
       showNotice("Room sync failed. Check your connection.");
@@ -822,8 +793,7 @@ export default function App() {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ code: roomCode, pid, key: "" }),
-        }),
-        storage.del(hbKey(roomCode))
+        })
       );
       cleanupState.base = true;
     }
@@ -842,6 +812,8 @@ export default function App() {
           })
         );
       }
+      tasks.push(fetch("/api/cleanup-memes", { method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ code: roomCode, pid, token: getRoomToken(roomCode), gameId: state?.submitDeadline }) }));
       cleanupState.images = true;
     }
 
@@ -849,40 +821,36 @@ export default function App() {
     await Promise.allSettled(tasks);
   }, [code, pid]);
 
+  const sendHostHeartbeat = useCallback(async () => {
+    try {
+      const response = await fetch('/api/room/host-presence', {method:'POST',headers:{'Content-Type':'application/json'},
+        body:JSON.stringify({action:'heartbeat',code,pid,token:getRoomToken(code)})});
+      if (!response.ok) console.info('host_heartbeat_held',{code,status:response.status});
+    } catch { console.info('host_heartbeat_unavailable',{code}); }
+  },[code,pid]);
+
   const checkHostMigration = useCallback(async () => {
     const cur = gsRef.current;
-    if (!cur || cur.phase === "game_over") return;
-    if (isHostRef.current) return;
+    if (!cur || cur.phase === 'game_over' || isHostRef.current) return;
     try {
       const r = await storage.get(hbKey(code));
-      const now = Date.now();
-      let hostAlive = false;
-
-      if (r?.value) {
+      const now = Date.now(); let heartbeat;
+      try { heartbeat = r?.value ? JSON.parse(r.value) : null; } catch { heartbeat=null; }
+      if (heartbeat?.pid === cur.host && Number.isFinite(heartbeat.ts)) {
         hbMissingSinceRef.current = null;
-        const hb: { ts?: number } = JSON.parse(r.value);
-        hostAlive = typeof hb.ts === "number" && now - hb.ts < HOST_STALE_MS;
+        if (heartbeatIsFresh(heartbeat,cur.host,now,cur.phase)) return;
       } else {
-        hbMissingSinceRef.current = hbMissingSinceRef.current ?? now;
-        hostAlive = now - hbMissingSinceRef.current < HOST_STALE_MS;
+        hbMissingSinceRef.current ??= now;
+        if (now-hbMissingSinceRef.current < hostGraceMs(cur.phase)) return;
       }
-      if (hostAlive) return;
-
-      // Any connected non-host participant may take over after heartbeat expiry.
-      const isCandidate = cur.players.some((p: { id: string }) => p.id !== cur.host && p.id === pid);
-      if (!isCandidate) return;
-      // Confirm host hasn't already been migrated (re-fetch to avoid races)
+      if (!cur.players.some(player => player.id === pid)) return;
       const fresh = await fetchGs() || cur;
-      if (fresh.host !== cur.host) return;
-      // Take over: write heartbeat first, then update room state
-      await storage.set(hbKey(code), JSON.stringify({ pid, ts: Date.now() }));
-      const migrated = await writeGs({ ...fresh, host: pid });
-      if (migrated) hbMissingSinceRef.current = null;
-    } catch (error) {
-      hbMissingSinceRef.current = null;
-      console.error("host_migration_check_failed", { code, pid, error });
-    }
-  }, [code, fetchGs, writeGs]);
+      if (fresh.host !== cur.host || fresh.phase === 'game_over') return;
+      const response = await fetch('/api/room/host-presence',{method:'POST',headers:{'Content-Type':'application/json'},
+        body:JSON.stringify({action:'claim',code,pid,token:getRoomToken(code),expectedHost:cur.host})});
+      if (response.ok) { hbMissingSinceRef.current=null; await fetchGs(); }
+    } catch { console.info('host_migration_check_unavailable',{code}); }
+  },[code,pid,fetchGs]);
 
   // Keep refs in sync so interval callbacks always see current state
   useEffect(() => {
@@ -934,15 +902,19 @@ export default function App() {
   // Write initial heartbeat whenever this client becomes (or remains) host
   useEffect(() => {
     if (view === "game" && code && gs?.host === pid) {
-      storage.set(hbKey(code), JSON.stringify({ pid, ts: Date.now() })).catch(() => {});
+      void sendHostHeartbeat();
     }
-  }, [view, code, gs?.host]);
+  }, [view, code, gs?.host, sendHostHeartbeat]);
 
   useEffect(() => {
     if (view === "game" && code) {
       pollRef.current = setInterval(async () => {
         const next = await fetchGs();
         if (next) {
+          lobbyMissingPollsRef.current = 0;
+          return;
+        }
+        if (!lastRoomReadWasMissing.current) {
           lobbyMissingPollsRef.current = 0;
           return;
         }
@@ -960,7 +932,7 @@ export default function App() {
       const hbDelay = setTimeout(() => {
         hbIntervalRef.current = setInterval(() => {
           if (isHostRef.current) {
-            storage.set(hbKey(code), JSON.stringify({ pid, ts: Date.now() })).catch(() => {});
+            void sendHostHeartbeat();
           } else {
             checkHostMigration();
           }
@@ -974,7 +946,18 @@ export default function App() {
         clearTimeout(hbDelay);
       };
     }
-  }, [view, code, fetchGs, checkHostMigration]);
+  }, [view, code, fetchGs, checkHostMigration, sendHostHeartbeat]);
+
+  useEffect(() => {
+    if(view !== 'game' || !code) return;
+    const resume = async () => {
+      if(document.visibilityState !== 'visible') return;
+      const fresh = await fetchGs();
+      if(fresh?.host === pid && fresh.phase !== 'game_over') await sendHostHeartbeat();
+    };
+    window.addEventListener('focus',resume);document.addEventListener('visibilitychange',resume);
+    return () => {window.removeEventListener('focus',resume);document.removeEventListener('visibilitychange',resume);};
+  },[view,code,pid,fetchGs,sendHostHeartbeat]);
 
   // Detect when this player has been kicked from the lobby
   useEffect(() => {
@@ -1116,7 +1099,7 @@ export default function App() {
     );
     await writeGs({
       ...fresh, phase:"submitting", prompts, submissions:{}, doneSubmitting:[], votingRound:0,
-      matchups:[], currentMatchup:0, roundMatchupWins:{}, voteDeadline:null, usedPrompts: prompts, roundPlan:plan,
+      matchups:[], currentMatchup:0, roundMatchupWins:{}, voteDeadline:null, usedPrompts: prompts, roundPlan:plan, answerModePolicy: fresh.alternateModes === false ? CHOICE_MODE_POLICY : ANSWER_MODE_POLICY, alternateModes: fresh.alternateModes !== false, answerModeOverrides: {},
       submitDeadline: Date.now() + (fresh.submitSecs ?? SUBMIT_SECS) * rounds * 1000
     });
   };
@@ -1244,13 +1227,13 @@ function MissingGiphyConfig() {
     <div style={g.page}>
       <div style={g.card}>
         <div style={g.h1}>GIF BATTLES</div>
-        <div style={g.sub}>GIPHY is not configured for this deployment</div>
+        <div style={g.sub}>GIF search is not configured for this deployment</div>
         <div style={{background:C.card2,borderRadius:12,padding:"14px 16px",marginBottom:16,fontSize:13,lineHeight:1.9,color:C.muted,border:`1px solid ${C.muted}22`}}>
           <div style={{color:C.text,fontWeight:700,marginBottom:6,fontSize:14}}>Fix deployment config:</div>
-          1. Add <code style={{background:`${C.cyan}18`,color:C.cyan,padding:"1px 6px",borderRadius:4,fontSize:11}}>NEXT_PUBLIC_GIPHY_KEY</code><br/>
+          1. Add a provider key, e.g. <code style={{background:`${C.cyan}18`,color:C.cyan,padding:"1px 6px",borderRadius:4,fontSize:11}}>NEXT_PUBLIC_GIPHY_KEY</code><br/>
           2. Redeploy the app<br/>
           <div style={{marginTop:8,fontSize:12,color:C.muted}}>
-            GIF search is disabled until this key is configured.
+            Configure NEXT_PUBLIC_GIPHY_KEY or NEXT_PUBLIC_KLIPY_KEY to enable GIF search.
           </div>
         </div>
       </div>
@@ -1269,13 +1252,17 @@ function HomeScreen({ nick, setNick, joinIn, setJoinIn, err, setErr, onCreate, o
             color:C.text, lineHeight:1, marginBottom:6, textShadow:`0 2px 0 ${C.bg}, 0 0 28px ${C.accent}55`}}>
             GIF BATTLES
           </div>
-          <div style={{color:C.muted, fontSize:11, letterSpacing:5, fontWeight:600}}>PICK · VOTE · GLORY</div>
+          <div style={{color:C.muted, fontSize:11, letterSpacing:5, fontWeight:600}}>CREATE · VOTE · GLORY</div>
           <div style={{marginTop:12,color:C.muted,fontSize:13,lineHeight:1.6}}>
             A fast online party game for remote teams, coworker happy hours, and friend groups.
           </div>
           <div style={{marginTop:6,color:C.muted,fontSize:13,lineHeight:1.6}}>
-            Create a room, submit your funniest GIF answers, vote head-to-head, and win the scoreboard.
+            Find a funny GIF or create your own meme. Add a caption, get optional AI help, and vote for the funniest answer.
           </div>
+        </div>
+
+        <div role="note" aria-label="Beta availability" style={{marginBottom:16,padding:"12px 14px",borderRadius:10,background:C.card2,border:`1px solid ${C.muted}22`,fontSize:12,lineHeight:1.6,color:C.muted}}>
+          <strong style={{color:C.text}}>Public beta</strong> · We’re still testing and improving the game. GIF search has limited quotas; if both providers reach their limits, the affected question switches to Meme mode. Keep playing by creating your own captioned meme or submitting a text answer. AI tools are optional and require the host to enable them.
         </div>
         {err && <div style={g.err}>⚠ {err}</div>}
         <input style={g.inp} placeholder="Your nickname" value={nick} maxLength={20}
@@ -1289,7 +1276,7 @@ function HomeScreen({ nick, setNick, joinIn, setJoinIn, err, setErr, onCreate, o
           <div style={{fontSize:11,color:C.muted,letterSpacing:2,marginBottom:8,fontWeight:700}}>HOW TO PLAY</div>
           <div style={{fontSize:13,lineHeight:1.7,color:C.text}}>
             1. Create a room and share the 6-character code.<br/>
-            2. Submit your funniest GIF answer for each prompt.<br/>
+            2. Answer each prompt with a funny GIF or a meme you create.<br/>
             3. Vote in head-to-head matchups until one winner remains.
           </div>
           <div style={{marginTop:8,fontSize:12,lineHeight:1.6,color:C.muted}}>
@@ -1318,6 +1305,15 @@ function HomeScreen({ nick, setNick, joinIn, setJoinIn, err, setErr, onCreate, o
 
 // ── Lobby ─────────────────────────────────────────────────────────────────────
 function Lobby({ gs, pid, code, isHost, startGame, leave, writeGs }) {
+  const [alternateDraft,setAlternateDraft] = useState(gs.alternateModes !== false);
+  const [alternateSaving,setAlternateSaving] = useState(false);
+  useEffect(() => { if (!alternateSaving) setAlternateDraft(gs.alternateModes !== false); }, [gs.alternateModes,alternateSaving]);
+  const saveAlternateMode = async (enabled:boolean) => {
+    if (!isHost || alternateSaving) return;
+    setAlternateDraft(enabled); setAlternateSaving(true);
+    try { if (!await writeGs({...gs,alternateModes:enabled})) setAlternateDraft(gs.alternateModes !== false); }
+    finally { setAlternateSaving(false); }
+  };
   const { C, g } = useContext(ThemeCtx);
   const [copied, setCopied] = useState(false);
   const [promptInput, setPromptInput] = useState("");
@@ -1552,6 +1548,8 @@ function Lobby({ gs, pid, code, isHost, startGame, leave, writeGs }) {
           <button className="gbtn" style={{...g.btnSm,background:copied?C.green:C.accent,color:"#fff",padding:"10px 18px"}} onClick={copy}>{copied?"✓ Copied":"Copy"}</button>
         </div>
 
+
+
         {/* Settings grid */}
         {(() => {
           const sSecs = gs.submitSecs ?? SUBMIT_SECS;
@@ -1579,9 +1577,13 @@ function Lobby({ gs, pid, code, isHost, startGame, leave, writeGs }) {
           return (
             <div style={{background:C.card2,borderRadius:12,padding:"14px 16px",marginBottom:16}}>
               <div style={{fontSize:11,color:C.muted,letterSpacing:2,marginBottom:12}}>GAME SETTINGS</div>
+              {isHost ? <label style={{display:'block',fontSize:13,marginBottom:8,cursor:'pointer'}}>
+                <input type="checkbox" checked={alternateDraft} disabled={alternateSaving} onChange={event => void saveAlternateMode(event.target.checked)}/>{' '}Alternate GIF and Meme rounds
+              </label> : <div style={{fontSize:13,marginBottom:8}}>Answer format: {gs.alternateModes !== false ? 'Alternating GIF and Meme rounds' : 'Players choose GIF or Meme'}</div>}
+              <div style={{fontSize:12,color:C.muted,marginBottom:12}}>{gs.alternateModes !== false ? 'On: rounds alternate GIF → Meme, with one required mode per question.' : 'Off: players choose Search GIFs or Create Meme for every question.'}</div>
               {settingRow("ROUNDS", "", [3,5,7,10], rounds, setRounds)}
               {settingRow("NAME-BASED ROUNDS", "", nameRoundOptions, namePromptRounds, setNamePromptRounds)}
-              {settingRow("GIFs PER HEAT", "", [2,4,6,8], maxC, setMaxComp)}
+              {settingRow("ANSWERS PER HEAT", "", [2,4,6,8], maxC, setMaxComp)}
               <div style={{fontSize:12,color:C.muted,marginBottom:12,marginTop:-8}}>
                 {`${heatsPerRound} heat${heatsPerRound!==1?"s":""}/round · ${matchupsPerRound} matchup${matchupsPerRound!==1?"s":""}/round · ${rounds} rounds`}
               </div>
@@ -1593,7 +1595,7 @@ function Lobby({ gs, pid, code, isHost, startGame, leave, writeGs }) {
               </div>
               {settingRow("SELECT TIME", "s", [30,60,90,120], sSecs, setSubmitSecs)}
               <div style={{fontSize:12,color:C.muted,marginBottom:12,marginTop:-8}}>
-                {`${sSecs}s × ${rounds} questions = ${sSecs*rounds}s total to pick GIFs`}
+                {`${sSecs}s × ${rounds} questions = ${sSecs*rounds}s total to create your answers`}
               </div>
               {settingRow("VOTE TIME", "s", [8,12,20,30], vSecs, setVoteSecs)}
               <div style={{fontSize:12,color:C.muted,marginTop:-8}}>
@@ -1769,7 +1771,7 @@ function Lobby({ gs, pid, code, isHost, startGame, leave, writeGs }) {
         ))}
         <div style={{marginTop:16}}>
           {isHost
-            ?<button className="gbtn" style={{...g.btn,...g.btnP}} onClick={startGame}>{gs.players.length<2?"⏳ Need more players…":"🚀 Start Game"}</button>
+            ?<button className="gbtn" style={{...g.btn,...g.btnP}} disabled={alternateSaving} onClick={startGame}>{alternateSaving ? "Saving settings…" : gs.players.length<2?"⏳ Need more players…":"🚀 Start Game"}</button>
             :<div style={{textAlign:"center",color:C.muted,padding:12,background:C.card2,borderRadius:10,marginBottom:10,border:`1px solid ${C.muted}22`}}>⏳ Waiting for host to start…</div>}
           <button className="gbtn" style={{...g.btn,...g.btnS,marginBottom:0}} onClick={leave}>← Leave</button>
         </div>
@@ -1793,18 +1795,45 @@ function Submit({ gs, pid, code, apiKey, writeGs, fetchGs, transitioning, transi
   const currentPrompt = currentRoundIndex == null ? "" : (gs.prompts as string[])?.[currentRoundIndex] ?? "";
 
   const [query, setQuery] = useState("");
-  const [gifs, setGifs] = useState<Array<{id:string,url:string,preview:string}>>([]);
-  const [offset, setOffset] = useState(0);
+  const [gifs, setGifs] = useState<MediaResult[]>([]);
+  const [provider, setProvider] = useState<RemoteProvider>(primaryProvider);
+  const [searchedQuery, setSearchedQuery] = useState("");
+  const [cursor, setCursor] = useState<string | undefined>();
+  const requestRef = useRef<AbortController | null>(null);
+  const busyRef = useRef(false);
+  const pausedRef = useRef<Partial<Record<RemoteProvider, number>>>({});
+  useEffect(() => () => requestRef.current?.abort(), []);
   const [hasMore, setHasMore] = useState(false);
-  const [sel, setSel] = useState<{id:string,url:string,preview:string}|null>(null);
+  const [sel, setSel] = useState<MediaResult | null>(null);
   const [searching, setSearching] = useState(false);
   const [searchErr, setSearchErr] = useState("");
-  const [giphyPauseUntil, setGiphyPauseUntil] = useState(0);
-  const searchQ = useRef<ReturnType<typeof setTimeout>|null>(null);
-  const [activeTab, setActiveTab] = useState<"giphy"|"write">(apiKey ? "giphy" : "write");
+  const [gifSubmitting, setGifSubmitting] = useState(false);
+  const [memeFallbackNeeded, setMemeFallbackNeeded] = useState(false);
+  const [switchingToMeme, setSwitchingToMeme] = useState(false);
+  const [chosenMode, setChosenMode] = useState<"giphy" | "meme">(apiKey ? "giphy" : "meme");
+  const modeChoiceEnabled = isChoiceMode(gs) && !gs.answerModeOverrides?.[currentRoundIndex ?? 0];
+  const activeTab = modeChoiceEnabled ? (apiKey ? chosenMode : "meme") : getAnswerMode(gs, currentRoundIndex ?? 0, Boolean(apiKey));
+  useEffect(() => { setChosenMode(apiKey ? "giphy" : "meme"); }, [currentRoundIndex, apiKey]);
   const [textStyle, setTextStyle] = useState("random");
   const [generating, setGenerating] = useState(false);
   const [genError, setGenError] = useState("");
+  const [answerSuggestions, setAnswerSuggestions] = useState<string[]>([]);
+  const [revising, setRevising] = useState(false);
+  const revisionRef = useRef<AbortController | null>(null);
+  const imageRequestRef = useRef<AbortController | null>(null);
+  useEffect(() => () => { revisionRef.current?.abort(); imageRequestRef.current?.abort(); }, []);
+  const [roomAiReady, setRoomAiReady] = useState<boolean | null>(null);
+  useEffect(() => {
+    const controller = new AbortController();
+    fetch(`/api/gemini-key?code=${encodeURIComponent(code)}&pid=${encodeURIComponent(pid)}`, { signal: controller.signal })
+      .then(response => response.ok ? response.json() : null)
+      .then(data => { if (!controller.signal.aborted) setRoomAiReady(Boolean(data?.exists)); })
+      .catch(() => { if (!controller.signal.aborted) setRoomAiReady(false); });
+    return () => controller.abort();
+  }, [code, pid]);
+  const [memeTemplate, setMemeTemplate] = useState<MediaResult | null>(null);
+  const [templateSearch, setTemplateSearch] = useState('');
+  const [memeSubmitting, setMemeSubmitting] = useState(false);
   const [genImageUrl, setGenImageUrl] = useState<string|null>(null);
   const [genSlow, setGenSlow] = useState(false);
   const genSlowRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -1834,64 +1863,72 @@ function Submit({ gs, pid, code, apiKey, writeGs, fetchGs, transitioning, transi
   // Reset search state whenever the player advances to the next prompt
   useEffect(() => {
     setQuery("");
+    setMemeTemplate(null); setTemplateSearch(''); setMemeSubmitting(false);
     setGifs([]);
-    setOffset(0);
+    requestRef.current?.abort();
+    requestRef.current = null;
+    busyRef.current = false;
+    setSearching(false);
+    setCursor(undefined);
+    setSearchedQuery("");
     setHasMore(false);
     setSel(null);
     setSearchErr("");
+    setGifSubmitting(false); setMemeFallbackNeeded(false); setSwitchingToMeme(false);
     setGenError("");
+    revisionRef.current?.abort(); imageRequestRef.current?.abort();
+    setAnswerSuggestions([]); setRevising(false);
     setGenImageUrl(null);
     setGenerating(false);
     setGenSlow(false);
     clearTimeout(genSlowRef.current!);
     genSlowRef.current = null;
-  }, [currentRoundIndex]);
-  useEffect(() => {
-    if (!apiKey && activeTab !== "write") setActiveTab("write");
-  }, [apiKey, activeTab]);
-
-  const doSearch = async (q: string) => {
-    if (giphyPauseUntil > Date.now()) {
-      setSearchErr("GIF search is taking a short break for everyone. Use Write Answer or create an AI image instead.");
-      return;
-    }
-    setGifs([]);
-    setOffset(0);
-    setHasMore(false);
-    setSearching(true);
-    setSearchErr("");
-    const { items, error, rateLimited, retryAfter } = await searchGifs(q, apiKey, code, pid, 0);
-    if (error) {
-      setSearchErr(error);
-      if (rateLimited) setGiphyPauseUntil(Date.now() + Math.max(60, retryAfter || 60) * 1000);
-    }
-    else if (!items.length) setSearchErr("No results — try different keywords");
-    setGifs(items);
-    setHasMore(items.length === 12);
-    setSearching(false);
+  }, [currentRoundIndex, activeTab]);
+  const fallbackMode = async (mode: 'meme') => {
+    if (currentRoundIndex == null) return;
+    const fresh = await fetchGs() || gs;
+    if (fresh.phase !== 'submitting' || fresh.submitDeadline !== gs.submitDeadline) return;
+    if (!await writeGs({ ...fresh, answerModeOverrides: { ...(fresh.answerModeOverrides || {}), [currentRoundIndex]: mode } })) throw new Error("Could not change the unavailable answer mode. Please retry.");
   };
 
-  const loadMore = useCallback(async () => {
-    if (searching || !hasMore || !query.trim() || offset >= 12) return;
-    if (giphyPauseUntil > Date.now()) {
-      setSearchErr("GIF search is taking a short break for everyone. Use Write Answer or create an AI image instead.");
-      return;
-    }
-    const newOffset = offset + 12;
+  const runSearch = async (q: string, append = false) => {
+    const term = q.trim();
+    if (!term || busyRef.current) return;
+    const controller = new AbortController();
+    requestRef.current?.abort();
+    requestRef.current = controller;
+    busyRef.current = true;
     setSearching(true);
-    const { items, error, rateLimited, retryAfter } = await searchGifs(query, apiKey, code, pid, newOffset);
-    if (error) {
-      setSearchErr(error);
-      if (rateLimited) setGiphyPauseUntil(Date.now() + Math.max(60, retryAfter || 60) * 1000);
-      setHasMore(false);
-      setSearching(false);
-      return;
+    setSearchErr("");
+    try {
+      const result = await searchMedia({ provider, query: term, cursor: append ? cursor : undefined,
+        code, pid, signal: controller.signal, paused: pausedRef.current,
+        onCooldown: (id, until) => { pausedRef.current[id] = until; } });
+      if (requestRef.current !== controller || controller.signal.aborted) return;
+      setProvider(result.provider);
+      setMemeFallbackNeeded(false);
+      if (!append || result.replaceResults) setSel(null);
+      setGifs(previous => append && !result.replaceResults ? [...previous, ...result.items] : result.items);
+      setSearchedQuery(term);
+      setCursor(result.nextCursor);
+      setHasMore(Boolean(result.nextCursor));
+      if (!result.items.length && !append) setSearchErr("No results — try different keywords");
+    } catch (error) {
+      if (controller.signal.aborted || requestRef.current !== controller) return;
+      setSearchErr(error instanceof Error ? error.message : "GIF search failed. Please try again.");
+      if (error instanceof ProviderError && error.status === 429 && enabledProviders.every(id => (pausedRef.current[id] || 0) > Date.now())) {
+        setMemeFallbackNeeded(true);
+        await fallbackMode("meme").catch(() => setSearchErr("GIF search is unavailable, and the mode change could not be saved. Please retry."));
+      }
+    } finally {
+      if (requestRef.current === controller) {
+        busyRef.current = false;
+        setSearching(false);
+      }
     }
-    setGifs(prev => [...prev, ...items]);
-    setOffset(newOffset);
-    setHasMore(false);
-    setSearching(false);
-  }, [searching, hasMore, offset, query, apiKey, code, pid, giphyPauseUntil]);
+  };
+  const doSearch = (q: string) => runSearch(q);
+  const loadMore = () => { if (hasMore && cursor) void runSearch(searchedQuery, true); };
 
   const STYLES = [
     { key: "random", label: "🎲 Random" },
@@ -1905,8 +1942,25 @@ function Submit({ gs, pid, code, apiKey, writeGs, fetchGs, transitioning, transi
     { key: "comic", label: "Comic" },
   ];
 
+  const reviseAnswer = async () => {
+    if (roomAiReady !== true || currentRoundIndex == null) return;
+    revisionRef.current?.abort(); const controller = new AbortController(); revisionRef.current = controller;
+    setRevising(true); setGenError(""); setAnswerSuggestions([]);
+    try {
+      const response = await fetch('/api/meme-answers', { method: 'POST', headers: { 'Content-Type': 'application/json' }, signal: controller.signal,
+        body: JSON.stringify({ code, pid, token: getRoomToken(code), gameId: gs.submitDeadline, roundIndex: currentRoundIndex, draft: query.trim() }) });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error === 'ai_not_configured' ? 'Ask the host to add a Gemini key to enable AI.' : data.error === 'round_closed' || data.error === 'wrong_answer_mode' ? 'This meme question has ended or changed.' : 'AI suggestions are unavailable. Your answer is still editable.');
+      const choices = Array.isArray(data.suggestions) ? data.suggestions.filter(value => typeof value === 'string' && value.trim() && value.length <= 280).slice(0,3) : [];
+      if (!choices.length) throw new Error('No suggestions returned. You can still write your own answer.');
+      if (!controller.signal.aborted && revisionRef.current === controller) setAnswerSuggestions(choices);
+    } catch (error) { if (!controller.signal.aborted) setGenError(error instanceof Error ? error.message : 'AI suggestions are unavailable.'); }
+    finally { if (!controller.signal.aborted && revisionRef.current === controller) setRevising(false); }
+  };
+
   const generateImage = async () => {
-    if (!query.trim()) return;
+    if (!query.trim() || roomAiReady !== true || currentRoundIndex == null) return;
+    imageRequestRef.current?.abort(); const controller = new AbortController(); imageRequestRef.current = controller;
     setGenerating(true);
     setGenSlow(false);
     setGenError("");
@@ -1915,12 +1969,14 @@ function Submit({ gs, pid, code, apiKey, writeGs, fetchGs, transitioning, transi
     genSlowRef.current = setTimeout(() => setGenSlow(true), 8000);
     try {
       const res = await fetch("/api/generate-image", {
-        method: "POST",
+        signal: controller.signal, method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ roomCode: code, pid, textAnswer: query, gamePrompt: currentPrompt, style: textStyle }),
+        body: JSON.stringify({ roomCode: code, pid, textAnswer: query, style: textStyle, templateId: memeTemplate?.providerId, memeImage: true, token: getRoomToken(code), gameId: gs.submitDeadline, roundIndex: currentRoundIndex }),
       });
       const data = await res.json();
-      if (data.error === "not_configured") { setGenError("No Gemini key set — ask the host to add one in the lobby"); return; }
+      if (controller.signal.aborted || imageRequestRef.current !== controller) return;
+      if (data.error === "round_closed" || data.error === "wrong_answer_mode") { setGenError("This meme question has ended or changed."); return; }
+      if (data.error === "not_configured") { setRoomAiReady(false); setGenError("No Gemini key set — ask the host to add one in the lobby"); return; }
       if (data.error === "invalid_key") { setGenError("Invalid Gemini key — ask the host to update it in the lobby"); return; }
       if (data.error === "forbidden") { setGenError("Room authorization failed — rejoin the room"); return; }
       if (data.error === "provider_bad_request") { setGenError("Gemini rejected the request (model/config). Please try again later."); return; }
@@ -1938,8 +1994,9 @@ function Submit({ gs, pid, code, apiKey, writeGs, fetchGs, transitioning, transi
       if (data.error || !data.url) { setGenError("Generation failed — try again"); return; }
       setGenImageUrl(data.url);
     } catch {
-      setGenError("Generation failed — check your connection");
+      if (!controller.signal.aborted) setGenError("Generation failed — check your connection");
     } finally {
+      if (controller.signal.aborted || imageRequestRef.current !== controller) return;
       clearTimeout(genSlowRef.current!);
       genSlowRef.current = null;
       setGenSlow(false);
@@ -1947,21 +2004,15 @@ function Submit({ gs, pid, code, apiKey, writeGs, fetchGs, transitioning, transi
     }
   };
 
-  const onQ = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const v = e.target.value;
-    setQuery(v);
-    clearTimeout(searchQ.current!);
-    if (v.trim().length > 1) searchQ.current = setTimeout(() => doSearch(v), 500);
-    else { setGifs([]); setHasMore(false); setOffset(0); setSearchErr(""); }
-  };
-
   const submitSub = async (sub: Submission) => {
     if (currentRoundIndex == null) return;
     const fresh = await fetchGs() || gs;
+    if (fresh.phase !== "submitting" || fresh.submitDeadline !== gs.submitDeadline || fresh.submitDeadline <= Date.now()) throw new Error("This submission round has ended.");
     const existing = ((fresh.submissions || {}) as Record<string, Array<Submission>>)[pid] || [];
     const freshAssignedRounds = getAssignedRoundIndexes(fresh, pid);
     const submitAt = freshAssignedRounds.find(ri => existing?.[ri] == null);
-    if (submitAt == null) return;
+    if (submitAt == null || submitAt !== currentRoundIndex) throw new Error("This answer has already been submitted.");
+    if (!submissionAllowedForQuestion(fresh, submitAt, sub, Boolean(apiKey))) throw new Error("The answer mode for this question changed. Please use the current mode.");
     const newArr = [...existing];
     newArr[submitAt] = sub;
     const newSubmissions = { ...fresh.submissions, [pid]: newArr };
@@ -1980,12 +2031,35 @@ function Submit({ gs, pid, code, apiKey, writeGs, fetchGs, transitioning, transi
       try { await transitionToVoting(newState); }
       finally { transitioning.current = false; }
     } else {
-      await writeGs(newState);
+      if (!await writeGs(newState)) throw new Error("Could not save your answer. Please try again.");
     }
+    if (sub.source === "local" && sub.assetId?.startsWith("local:")) recordStockEvent({ code, pid, token: getRoomToken(code), gameId: gs.submitDeadline, roundIndex: submitAt }, "selected", [sub.assetId.slice(6)]);
   };
-  const submit = () => { if (!sel) return; submitSub({ type: "giphy", url: sel.url, preview: sel.preview }); };
-  const submitText = () => { if (!query.trim()) return; submitSub({ type: "text", textAnswer: query.trim() }); };
-  const submitAI = () => { if (!genImageUrl || !query.trim()) return; submitSub({ type: "ai", url: genImageUrl, textAnswer: query.trim() }); };
+  const submitMedia = async (item: MediaResult) => {
+    await submitSub({ type: "media", source: item.source, assetId: item.id, mediaFormat: item.format,
+      url: item.displayUrl, preview: item.previewUrl, attribution: item.attribution, license: item.license });
+  };
+  const submit = async () => {
+    if (!sel || gifSubmitting || searching || switchingToMeme || memeFallbackNeeded) return;
+    setGifSubmitting(true); setSearchErr('');
+    try { await submitMedia(sel); void reportMediaSelection(sel, code, pid); }
+    catch (error) { setSearchErr(error instanceof Error ? error.message : 'Could not submit your GIF. Please retry.'); }
+    finally { setGifSubmitting(false); }
+  };
+  const retryMemeFallback = async () => {
+    if (switchingToMeme) return;
+    setSwitchingToMeme(true);
+    try { await fallbackMode('meme'); }
+    catch { setSearchErr('Could not switch this question to Meme mode. Check your connection and retry.'); }
+    finally { setSwitchingToMeme(false); }
+  };
+  const submitMemeAnswer = async () => {
+    if (!query.trim() || memeSubmitting || generating) return;
+    setMemeSubmitting(true); setGenError('');
+    try { await submitSub(genImageUrl ? { type: "ai", url: genImageUrl, textAnswer: query.trim() } : { type: "text", textAnswer: query.trim() }); }
+    catch (error) { setGenError(error instanceof Error ? error.message : 'Could not submit. Please retry.'); }
+    finally { setMemeSubmitting(false); }
+  };
 
   const forceStart = async () => {
     if (transitioning.current) return;
@@ -2060,40 +2134,43 @@ function Submit({ gs, pid, code, apiKey, writeGs, fetchGs, transitioning, transi
         <div style={g.prompt}>"{currentPrompt}"</div>
 
         {/* Shared text area */}
-        <textarea
+        {<textarea
           style={{...g.inp, resize:"none", height:64, marginBottom:10} as React.CSSProperties}
-          placeholder="Type your answer…"
+          placeholder={activeTab === "giphy" ? "Search GIFs" : "Your answer or meme idea…"}
+          maxLength={activeTab === "meme" ? 280 : undefined} disabled={generating || memeSubmitting}
           value={query}
           onChange={e => {
             const v = e.target.value;
             setQuery(v);
-            if (activeTab === "giphy") {
-              clearTimeout(searchQ.current!);
-              if (v.trim().length > 1) searchQ.current = setTimeout(() => doSearch(v), 500);
-              else { setGifs([]); setHasMore(false); setOffset(0); setSearchErr(""); }
-            }
+            revisionRef.current?.abort(); setRevising(false); setAnswerSuggestions([]);
             setGenImageUrl(null);
             setGenError("");
           }}
+          onKeyDown={e => {
+            if (activeTab === "giphy" && e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
+              e.preventDefault(); void doSearch(query);
+            }
+          }}
           autoFocus
-        />
+        />}
 
-        {/* Tab toggle */}
-        <div style={{display:"flex",gap:0,marginBottom:12,borderRadius:8,overflow:"hidden",border:`1px solid ${C.muted}33`}}>
-          {(apiKey ? ["giphy","write"] : ["write"]).map(tab => (
-            <button key={tab} onClick={()=>setActiveTab(tab as "giphy"|"write")}
-              style={{flex:1,padding:"8px 0",fontSize:12,fontWeight:700,letterSpacing:1,cursor:"pointer",border:"none",
-                background:activeTab===tab?`linear-gradient(135deg, ${C.accent}, ${C.cyan})`:C.card2,
-                color:activeTab===tab?"#fff":C.muted,
-                transition:"background 0.15s, color 0.15s"}}>
-              {tab==="giphy"?"Search GIFs":"Write Answer"}
-            </button>
-          ))}
-        </div>
+        {modeChoiceEnabled ? <div role="group" aria-label="Answer mode" style={{display:'flex',gap:8,marginBottom:12}}>
+          {(apiKey ? ['giphy','meme'] : ['meme']).map(mode => <button key={mode} type="button" aria-pressed={activeTab === mode}
+            style={{...g.btnSm,flex:1,background:activeTab === mode ? C.accent : C.card2,color:activeTab === mode ? '#fff' : C.text}}
+            onClick={() => setChosenMode(mode as 'giphy' | 'meme')}>{mode === 'giphy' ? 'Search GIFs' : 'Create Meme'}</button>)}
+        </div> : <div style={{...g.info, fontWeight:700, marginBottom:12}} aria-label="Required answer mode">
+          {answerModeLabels[activeTab]} · This question uses one answer mode.
+        </div>}
+        {gs.answerModeOverrides?.[currentRoundIndex] && <div role="status" style={g.info}>
+          GIF search is unavailable. This question now uses Meme mode for everyone still answering.
+        </div>}
 
         {/* Search GIFs tab */}
         {activeTab === "giphy" && (
           <>
+            <button className="gbtn" style={{...g.btn,...g.btnP}} disabled={searching || gifSubmitting || switchingToMeme || !query.trim()}
+              onClick={() => void doSearch(query)}>{searching ? "Searching…" : "Search"}</button>
+            <div style={{fontSize:12,color:C.muted,marginBottom:8}}>Searching {providerLabels[provider]}{searchedQuery ? ` · Results for “${searchedQuery}”` : ""}</div>
             {gifs.length > 0 && (
               <div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:6,maxHeight:300,overflowY:"auto",marginBottom:12}}>
                 {gifs.map(gif => (
@@ -2103,7 +2180,7 @@ function Submit({ gs, pid, code, apiKey, writeGs, fetchGs, transitioning, transi
                       boxShadow:sel?.id===gif.id?`0 0 12px ${C.accent}66`:"none",
                       transition:"border-color 0.15s, box-shadow 0.15s"}}>
                     <div style={{position:"absolute",inset:0}}>
-                      <GifImg url={gif.preview} style={{width:"100%",height:"100%"}} fit="contain"/>
+                      <GifImg url={gif.previewUrl} lazy style={{width:"100%",height:"100%"}} fit="contain"/>
                     </div>
                   </div>
                 ))}
@@ -2111,34 +2188,54 @@ function Submit({ gs, pid, code, apiKey, writeGs, fetchGs, transitioning, transi
             )}
             {searching && <div style={g.info}>Searching…</div>}
             {searchErr && !searching && <div style={g.err}>⚠ {searchErr}</div>}
-            {hasMore && !searching && !searchErr && (
+            {memeFallbackNeeded && <button type="button" style={{...g.btn,...g.btnS}} disabled={switchingToMeme || searching} onClick={() => void retryMemeFallback()}>
+              {switchingToMeme ? 'Switching…' : 'Switch this question to Meme'}
+            </button>}
+            {hasMore && !searching && !gifSubmitting && !searchErr && (
               <button className="gbtn" onClick={loadMore}
                 style={{...g.btnSm,width:"100%",marginBottom:12,background:C.card2,color:C.text,border:`1px solid ${C.muted}44`}}>
-                Show 12 more GIFs
+                Load more GIFs
               </button>
             )}
-            <PoweredByGiphy/>
+            <MediaAttribution source={provider}/>
             {sel && (
               <div style={{textAlign:"center",marginBottom:12}}>
                 <div style={{fontSize:10,color:C.muted,letterSpacing:3,marginBottom:6,fontWeight:600}}>SELECTED</div>
-                <GifImg url={sel.preview} style={{width:200,height:150,borderRadius:8,margin:"0 auto",border:`2px solid ${C.accent}`,boxShadow:`0 0 20px ${C.accent}44`}}/>
+                <GifImg url={sel.previewUrl} style={{width:200,height:150,borderRadius:8,margin:"0 auto",border:`2px solid ${C.accent}`,boxShadow:`0 0 20px ${C.accent}44`}}/>
               </div>
             )}
             <button className="gbtn" style={{...g.btn,...(sel?g.btnP:{background:C.card2,color:C.muted}),cursor:sel?"pointer":"not-allowed",marginBottom:0}}
-              onClick={submit} disabled={!sel}>
-              {sel?"Submit GIF":"Select a GIF first"}
+              onClick={() => void submit()} disabled={!sel || searching || gifSubmitting || switchingToMeme || memeFallbackNeeded}>
+              {gifSubmitting ? "Submitting…" : sel?"Submit GIF":"Select a GIF first"}
             </button>
           </>
         )}
 
-        {/* Write Answer tab */}
-        {activeTab === "write" && (
+        {/* Meme: written answers, AI creation, and captioned templates */}
+        {activeTab === "meme" && (
           <>
-            <div style={{marginBottom:12}}>
-              <div style={{fontSize:11,color:C.muted,letterSpacing:2,marginBottom:6}}>IMAGE STYLE</div>
+            {roomAiReady === false && <div role="status" style={g.info}>
+              {isHost ? "Add a Gemini key in the lobby before starting to enable AI writing, captions and meme images." : "Ask the host to add a Gemini key in the lobby to enable AI writing, captions and meme images."}
+              {" You can still write an answer or caption a template yourself."}
+            </div>}
+            <button type="button" disabled={roomAiReady !== true || revising || generating || memeSubmitting} style={{...g.btn,...g.btnS}} onClick={() => void reviseAnswer()}>
+              {revising ? 'Thinking…' : query.trim() ? 'Make it funnier with AI' : 'Suggest a funny answer with AI'}
+            </button>
+            {answerSuggestions.map((choice,index) => <button type="button" key={index} style={{...g.btn,...g.btnS}} disabled={generating || memeSubmitting}
+              onClick={() => { setQuery(choice); setGenImageUrl(null); setAnswerSuggestions([]); }}>{choice}</button>)}
+            <div style={{display:'flex',gap:8,marginBottom:12}}>
+              <button type="button" style={{...g.btn,...g.btnS,flex:1}} disabled={generating || memeSubmitting || !query.trim()} onClick={() => setTemplateSearch(query.trim().slice(0,200))}>Search</button>
+              <button type="button" style={{...g.btn,...g.btnS,flex:1}} disabled={generating || memeSubmitting} onClick={() => { setMemeTemplate(null); setGenImageUrl(null); }}>Text only</button>
+            </div>
+            <LocalPicks key={`meme-${currentRoundIndex}`} captionableOnly searchQuery={templateSearch} selectedId={memeTemplate?.id || ''} disabled={generating || memeSubmitting}
+              onSelect={template => { setMemeTemplate(template); setGenImageUrl(null); setGenError(''); }}
+              onExposure={ids => recordStockEvent({ code, pid, token: getRoomToken(code), gameId: gs.submitDeadline, roundIndex: currentRoundIndex }, "exposed", ids)} onSubmit={submitMedia} colors={C} styles={g}/>
+            {templateSearch && <div style={g.info}>Images matching “{templateSearch}” · <button type="button" style={g.btnSm} onClick={() => setTemplateSearch('')}>Browse all</button></div>}
+            <details style={{marginBottom:12}}>
+              <summary style={{cursor:'pointer',fontSize:12}}>AI image style · {textStyle}</summary>
               <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
                 {STYLES.map(s => (
-                  <button key={s.key} onClick={()=>{ setTextStyle(s.key); setGenImageUrl(null); setGenError(""); }}
+                  <button key={s.key} disabled={generating || memeSubmitting} onClick={()=>{ setTextStyle(s.key); setGenImageUrl(null); setGenError(""); }}
                     style={{...g.btnSm,
                       background:textStyle===s.key?`linear-gradient(135deg, ${C.accent}, ${C.cyan})`:C.card2,
                       color:textStyle===s.key?"#fff":C.text,
@@ -2147,7 +2244,7 @@ function Submit({ gs, pid, code, apiKey, writeGs, fetchGs, transitioning, transi
                   </button>
                 ))}
               </div>
-            </div>
+            </details>
             {genImageUrl && (
               <div style={{textAlign:"center",marginBottom:12}}>
                 <div style={{fontSize:10,color:C.muted,letterSpacing:3,marginBottom:6,fontWeight:600}}>GENERATED IMAGE</div>
@@ -2160,22 +2257,22 @@ function Submit({ gs, pid, code, apiKey, writeGs, fetchGs, transitioning, transi
             {generating && genSlow && (
               <div style={g.info}>Still generating… this can take up to about 45 seconds.</div>
             )}
-            <div style={{display:"flex",gap:8,marginBottom:0}}>
-              <button className="gbtn"
-                style={{...g.btn,...g.btnS,flex:1,marginBottom:0,opacity:generating||!query.trim()?0.6:1}}
-                onClick={generateImage}
-                disabled={generating || !query.trim()}>
-                {generating ? "✨ Generating…" : genImageUrl ? "✨ Regenerate" : "✨ Generate Image"}
-              </button>
-              <button className="gbtn"
-                style={{...g.btn,...(query.trim()?g.btnP:{background:C.card2,color:C.muted}),flex:1,marginBottom:0,cursor:query.trim()?"pointer":"not-allowed"}}
-                onClick={genImageUrl ? submitAI : submitText}
-                disabled={!query.trim()}>
-                {genImageUrl ? "Submit with Image" : query.trim() ? "Submit as Text" : "Type an answer first"}
-              </button>
-            </div>
+            <button className="gbtn" style={{...g.btn,...g.btnS}} onClick={generateImage}
+              disabled={generating || memeSubmitting || !query.trim() || roomAiReady !== true}>
+              {generating ? 'Generating…' : genImageUrl ? 'Regenerate image with AI' : memeTemplate ? 'Generate with AI using this idea' : 'Generate image with AI'}
+            </button>
+            {memeTemplate && <div style={g.info}>AI creates a new scene inspired by the selected image and your caption.</div>}
+            {memeTemplate && !genImageUrl && !generating ? <MemeEditor key={memeTemplate.id} template={memeTemplate} code={code} pid={pid}
+              token={getRoomToken(code)} gameId={gs.submitDeadline} roundIndex={currentRoundIndex} caption={query} onBusyChange={setMemeSubmitting} submitLabel="Submit" aiEnabled={false} styles={g} onSubmit={async (meme: CreatedMeme) => {
+                await submitSub({ type: "meme", source: "local", templateId: meme.templateId, assetId: `local:${meme.templateId}`,
+                  mediaFormat: "image", captions: meme.captions, url: meme.url, preview: meme.url, attribution: meme.attribution, license: meme.license });
+              }}/> : <>
+              <div role="status" style={g.info}>{generating ? 'Creating your image…' : genImageUrl ? 'Ready to submit your AI image.' : 'Ready to submit text only. Choose an image to turn it into a meme.'}</div>
+              <button className="gbtn" style={{...g.btn,...g.btnP,marginBottom:0}} disabled={!query.trim() || generating || memeSubmitting} onClick={() => void submitMemeAnswer()}>{memeSubmitting ? 'Submitting…' : 'Submit'}</button>
+            </>}
           </>
         )}
+
       </div>
     </div>
   );
@@ -2228,6 +2325,12 @@ function Voting({ gs, pid, code, isHost, fetchGs, writeGs, transitioning, advanc
     return()=>clearInterval(timerRef.current);
   },[gs.voteDeadline,mi]);
 
+  useEffect(() => {
+    if (!matchup || matchup.includes(pid)) return;
+    const ids = matchup.map(id => gs.submissions?.[id]?.[gs.votingRound]).filter(sub => sub?.source === "local" && sub.assetId?.startsWith("local:")).map(sub => sub.assetId.slice(6));
+    recordStockEvent({ code, pid, token: getRoomToken(code), gameId: gs.submitDeadline, roundIndex: gs.votingRound, matchup: mi }, "vote_exposed", ids);
+  }, [mi, gs.votingRound]);
+
   if(!matchup) return <div style={g.page}><div style={{color:C.muted}}>Tallying…</div></div>;
 
   const [lId,rId]=matchup;
@@ -2238,6 +2341,8 @@ function Voting({ gs, pid, code, isHost, fetchGs, writeGs, transitioning, advanc
     if(!canVote)return;
     await storage.set(vKey(code, gs.votingRound, mi, pid), side);
     setMyVote(side);
+    const sub = gs.submissions?.[side === "left" ? lId : rId]?.[gs.votingRound];
+    if (sub?.source === "local" && sub.assetId?.startsWith("local:")) recordStockEvent({ code, pid, token: getRoomToken(code), gameId: gs.submitDeadline, roundIndex: gs.votingRound, matchup: mi }, "voted", [sub.assetId.slice(6)]);
     // After voting, check if every eligible voter has now voted — if so, collapse the timer
     // for all clients by writing voteDeadline = now - 1 (the host's interval detects v=0)
     const voterIds = gs.players.filter(p => p.id !== lId && p.id !== rId).map(p => p.id);
@@ -2292,6 +2397,7 @@ function Voting({ gs, pid, code, isHost, fetchGs, writeGs, transitioning, advanc
             ? <GifImg className="vote-gif" url={sub.url} style={{width:"100%",height:220}}/>
             : <div className="vote-gif" style={{height:220,background:C.card2,display:"flex",alignItems:"center",justifyContent:"center",color:C.muted}}>No submission</div>}
         </div>
+        <MediaAttribution source={submissionSource(sub)} attribution={sub?.attribution} license={sub?.license}/>
         {subType === "ai" && sub?.textAnswer && (
           <div style={{fontSize:12,color:C.muted,textAlign:"center",fontStyle:"italic",maxWidth:"100%",
             overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>
@@ -2340,7 +2446,7 @@ function Voting({ gs, pid, code, isHost, fetchGs, writeGs, transitioning, advanc
           </div>
           <GifCard sub={rSub} id={rId} side="right"/>
         </div>
-        {(lSub?.type === "giphy" || rSub?.type === "giphy" || (!lSub?.type && lSub?.url) || (!rSub?.type && rSub?.url)) && <PoweredByGiphy/>}
+
         <div style={{textAlign:"center",color:C.muted,fontSize:13,marginTop:8}}>
           {showRes?(lv>rv?"Left wins! ✨":rv>lv?"Right wins! ✨":"Tie! Both get a point 🤝")+" Next up soon…"
             :inMatchup?"Your GIF is in this matchup — sit tight!"
@@ -2431,6 +2537,8 @@ function GameOver({ gs, writeGs, pid, runEndGameCleanup }) {
   const [downloadErr, setDownloadErr] = useState("");
   useEffect(() => {
     if (pid !== gs.host) return;
+    void fetch("/api/gif-events", { method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ code: gs.code, pid, provider: primaryProvider, event: "game_completed" }), keepalive: true }).catch(() => {});
     try { sessionStorage.removeItem("gifbattle_gemini_key"); } catch {}
     fetch("/api/gemini-key", {
       method: "POST",
@@ -2478,7 +2586,7 @@ function GameOver({ gs, writeGs, pid, runEndGameCleanup }) {
       const aiUrls = Array.from(new Set(
         Object.values(subs || {})
           .flat()
-          .filter((s: Submission) => s?.type === "ai" && typeof s?.url === "string")
+          .filter((s: Submission) => (s?.type === "ai" || s?.type === "meme") && typeof s?.url === "string")
           .map((s: Submission) => s.url as string)
       ));
       const aiDataUrlMap = new Map<string, string>();
@@ -2507,10 +2615,13 @@ function GameOver({ gs, writeGs, pid, runEndGameCleanup }) {
             return `<div class="card"><div class="name">${escapeHtml(nick)}</div><div class="text-answer">"${escapeHtml(sub.textAnswer || "")}"</div></div>`;
           }
           if (sub?.url) {
-            const imageSrc = sub?.type === "ai" ? (aiDataUrlMap.get(sub.url) || sub.url) : sub.url;
-            const badge = sub?.type === "ai" ? `<span class="badge">AI</span>` : `<span class="badge">GIF</span>`;
+            const rawSrc = (sub?.type === "ai" || sub?.type === "meme") ? (aiDataUrlMap.get(sub.url) || sub.url) : sub.url;
+            const imageSrc = rawSrc.startsWith("/media/") ? new URL(rawSrc, window.location.origin).href : rawSrc;
+            const source = submissionSource(sub);
+            const credit = source === "giphy" ? `<a href="https://giphy.com">Powered by GIPHY</a>` : source === "klipy" ? `<a href="https://klipy.com">Powered by KLIPY</a>` : source === "local" && sub.attribution && safeHttps(sub.attribution.url) ? `<a href="${escapeHtml(sub.attribution.url)}">${escapeHtml(sub.attribution.label)}</a>${sub.license && safeHttps(sub.license.url) ? ` · <a href="${escapeHtml(sub.license.url)}">${escapeHtml(sub.license.label)}</a>` : ""}` : "";
+            const badge = sub?.type === "ai" ? `<span class="badge">AI</span>` : `<span class="badge">${sub.type === "meme" ? "MEME" : sub.mediaFormat === "image" ? "IMAGE" : "GIF"}</span>`;
             const caption = sub?.textAnswer ? `<div class="caption">"${escapeHtml(sub.textAnswer)}"</div>` : "";
-            return `<div class="card"><div class="name">${escapeHtml(nick)}</div><div class="image-wrap"><img src="${escapeHtml(imageSrc)}" alt="submission" loading="lazy"/>${badge}</div>${caption}</div>`;
+            return `<div class="card"><div class="name">${escapeHtml(nick)}</div><div class="image-wrap"><img src="${escapeHtml(imageSrc)}" alt="submission" loading="lazy"/>${badge}</div>${credit}${caption}</div>`;
           }
           return `<div class="card"><div class="name">${escapeHtml(nick)}</div><div class="missing">No submission</div></div>`;
         }).join("");
@@ -2668,6 +2779,7 @@ function GameOver({ gs, writeGs, pid, runEndGameCleanup }) {
                         : sub?.url
                         ? <GifImg url={sub.url} style={{height:summaryMediaHeight,borderRadius:6,background:C.bg}} fit="contain"/>
                         : <div style={{height:summaryMediaHeight,background:C.card2,borderRadius:6,display:"flex",alignItems:"center",justifyContent:"center",color:C.muted,fontSize:12}}>No submission</div>}
+                      {sub?.source === "local" && <MediaCredit attribution={sub.attribution} license={sub.license}/>}
                     </div>
                   );
                 })}
@@ -2675,7 +2787,8 @@ function GameOver({ gs, writeGs, pid, runEndGameCleanup }) {
             </div>
           ))}
         </div>
-        <PoweredByGiphy/>
+        {Array.from(new Set(Object.values(gs.submissions || {}).flat().map((sub: Submission) => submissionSource(sub)).filter(Boolean)))
+          .map((source: string) => <MediaAttribution key={source} source={source}/>)}
         {downloadErr && <div style={g.err}>⚠ {downloadErr}</div>}
         <button className="gbtn" style={{...g.btn,...g.btnS,fontSize:16,letterSpacing:1}} onClick={downloadResults} disabled={downloading}>
           {downloading ? "Preparing Download…" : "↓ Download Results (HTML)"}

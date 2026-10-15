@@ -5,9 +5,12 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "test": "npm run build && playwright test",
+    "test": "npm run test:media && npm run build && playwright test",
     "test:smoke": "npm run build && playwright test tests/smoke.spec.ts",
-    "test:e2e": "npm run build && playwright test tests/e2e"
+    "test:e2e": "npm run build && playwright test tests/e2e",
+    "media": "node scripts/media/library.mjs",
+    "test:media": "node --test scripts/media/*.test.mjs",
+    "prebuild": "npm run media -- validate"
   },
   "dependencies": {
     "@sentry/nextjs": "^10.41.0",
@@ -16,7 +19,8 @@
     "@vercel/blob": "^2.3.0",
     "next": "^14",
     "react": "^18",
-    "react-dom": "^18"
+    "react-dom": "^18",
+    "sharp": "^0.35.5"
   },
   "devDependencies": {
     "@playwright/test": "^1.58.2",

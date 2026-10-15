@@ -2,6 +2,7 @@ import { withSentryConfig } from "@sentry/nextjs";
 
 /** @type {import('next').NextConfig} */
 const nextConfig = {
+  experimental: { outputFileTracingIncludes: { "/api/memes": ["./public/media/**/*"], "/api/meme-captions": ["./public/media/**/*"] } },
   async headers() {
     return [
       {

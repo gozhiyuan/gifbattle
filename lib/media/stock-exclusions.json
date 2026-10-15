@@ -1,0 +1,91 @@
+{
+  "version": 1,
+  "assets": [
+    {
+      "id": "pexels-7224649",
+      "sourceUrl": "https://www.pexels.com/photo/grey-and-white-cat-in-close-up-photography-7224649/",
+      "retainedId": "pexels-7224653",
+      "reason": "Visually reviewed repetitive photo series; two distinct reactions retained per series.",
+      "reviewedAt": "2026-10-13T17:19:23.940Z"
+    },
+    {
+      "id": "pexels-7224650",
+      "sourceUrl": "https://www.pexels.com/photo/close-up-shot-of-a-person-bathing-a-gray-cat-7224650/",
+      "retainedId": "pexels-7224653",
+      "reason": "Visually reviewed repetitive photo series; two distinct reactions retained per series.",
+      "reviewedAt": "2026-10-13T17:19:23.942Z"
+    },
+    {
+      "id": "pexels-37988098",
+      "sourceUrl": "https://www.pexels.com/photo/close-up-of-wet-feline-with-intense-gaze-37988098/",
+      "retainedId": "pexels-36284256",
+      "reason": "Visually reviewed repetitive photo series; two distinct reactions retained per series.",
+      "reviewedAt": "2026-10-13T17:19:23.942Z"
+    },
+    {
+      "id": "pexels-7224648",
+      "sourceUrl": "https://www.pexels.com/photo/a-person-taking-bath-a-pet-gray-cat-7224648/",
+      "retainedId": "pexels-7224653",
+      "reason": "Visually reviewed repetitive photo series; two distinct reactions retained per series.",
+      "reviewedAt": "2026-10-13T17:19:23.942Z"
+    },
+    {
+      "id": "pexels-7224645",
+      "sourceUrl": "https://www.pexels.com/photo/a-wet-cat-in-close-up-photography-7224645/",
+      "retainedId": "pexels-7224653",
+      "reason": "Visually reviewed repetitive photo series; two distinct reactions retained per series.",
+      "reviewedAt": "2026-10-13T17:19:23.942Z"
+    },
+    {
+      "id": "pexels-7224652",
+      "sourceUrl": "https://www.pexels.com/photo/close-up-shot-of-a-person-bathing-a-gray-cat-7224652/",
+      "retainedId": "pexels-7224653",
+      "reason": "Visually reviewed repetitive photo series; two distinct reactions retained per series.",
+      "reviewedAt": "2026-10-13T17:19:23.942Z"
+    },
+    {
+      "id": "pexels-7224655",
+      "sourceUrl": "https://www.pexels.com/photo/close-up-shot-of-a-person-bathing-a-gray-cat-7224655/",
+      "retainedId": "pexels-7224653",
+      "reason": "Visually reviewed repetitive photo series; two distinct reactions retained per series.",
+      "reviewedAt": "2026-10-13T17:19:23.942Z"
+    },
+    {
+      "id": "pexels-7224646",
+      "sourceUrl": "https://www.pexels.com/photo/photo-of-a-person-bathing-a-cat-7224646/",
+      "retainedId": "pexels-7224653",
+      "reason": "Visually reviewed repetitive photo series; two distinct reactions retained per series.",
+      "reviewedAt": "2026-10-13T17:19:23.942Z"
+    },
+    {
+      "id": "pexels-7224657",
+      "sourceUrl": "https://www.pexels.com/photo/a-person-holding-a-cat-7224657/",
+      "retainedId": "pexels-7224653",
+      "reason": "Visually reviewed repetitive photo series; two distinct reactions retained per series.",
+      "reviewedAt": "2026-10-13T17:19:23.942Z"
+    },
+    {
+      "id": "commons-a89bb917547da28d",
+      "sourceUrl": "https://commons.wikimedia.org/wiki/File:IMG_20180430_132807%D1%89.jpg",
+      "reason": "Held from family catalog: taxidermy or explicit sensitive source metadata.",
+      "reviewedAt": "2026-10-14T22:25:14.007Z"
+    }
+  ],
+  "distinctPairs": [
+    {
+      "a": "pexels-7224653",
+      "b": "pexels-7224656",
+      "reason": "Same bath series, but anger and upward startled expression are distinct reactions."
+    },
+    {
+      "a": "pexels-36284256",
+      "b": "pexels-36284255",
+      "reason": "Same wet cat, but judging stare and open-mouth disgust are distinct reactions."
+    },
+    {
+      "a": "pexels-33217494",
+      "b": "pexels-32355795",
+      "reason": "Same dog, but midair jump and running close-up have distinct composition/actions."
+    }
+  ]
+}

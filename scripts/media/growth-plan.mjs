@@ -1,0 +1,22 @@
+// Specific photographed situations, rather than appending “funny” to every search.
+const groups={
+ situations:{workplace:['boring meeting','confused coworker','office argument','overwhelmed office worker','sleeping at desk','businessman birthday','office celebration','messy desk','video call reaction','coworkers laughing'],social:['awkward conversation','friends making faces','friends arguing','surprised friends','people whispering','awkward hug','couple disagreement','friends playing prank'],family:['parent exhausted','toddler tantrum','baby surprised','siblings fighting','family laughing','family dinner mess','grandparents dancing','parent child disagreement'],sports:['exercise exhausted','yoga awkward','runner exhausted','sports celebration','losing board game','football disappointed','gym funny face'],travel:['waiting airport','lost tourist','packing suitcase','traffic frustration','crowded train','missed bus','car stuck mud'],chores:['laundry pile','washing dishes mess','cleaning exhausted','vacuum dog','messy bedroom','housework argument'],technology:['confused computer','frustrated laptop','phone surprised','headphones tangled','gaming reaction','video call funny'],school:['bored student','exam stress','student confused','classroom laughing','homework frustrated'],shopping:['shopping overwhelmed','grocery bags','shopping cart full','checkout waiting','fitting room surprise'],celebration:['birthday cake surprise','party cleanup','confetti mess','holiday dinner','awkward dancing','party tired']},
+ food:{cooking:['cooking disaster','burnt toast','messy kitchen','pasta mess','kitchen smoke','cooking confused','pancake flip','spilled flour'],baking:['cake fail','cookie dough mess','baking flour face','collapsed cake','messy frosting','bread dough overflow','uneven cake'],spills:['spilled coffee','ice cream melting','spilled cereal','milk spill','sauce spill','dropped pizza','food on floor'],eating:['hungry person','giant sandwich','messy eating','spaghetti face','sour lemon reaction','hot pepper reaction','eating surprised','last slice pizza'],presentation:['unusual vegetable','crooked cake','tiny portion','giant food','funny fruit','food face','uneven pancake','overfilled plate']},
+ objects:{broken:['broken umbrella','broken chair','broken phone','car breakdown','broken bicycle','repair frustration','flat tire'],tangled:['tangled cables','tangled headphones','tangled rope','messy wires','tangled yarn','tangled lights'],oversized:['giant teddy bear','tiny chair','oversized shoes','giant suitcase','small umbrella','giant spoon'],misplaced:['shoe in tree','chair in water','abandoned shopping cart','lost shoe','upside down furniture','unexpected traffic cone'],faces:['object face','pareidolia','vegetable face','car face','house face','funny shadow'],clutter:['messy garage','overloaded shelf','cluttered desk','overflowing bin','stacked chairs','pile of shoes']},
+ 'other-animals':Object.fromEntries(['goats','horses','cows','pigs','sheep','rabbits','hamsters','squirrels','raccoons','foxes','bears','pandas','penguins','seals','otters','llamas','reptiles','insects','fish','birds','monkeys','geese'].map(species=>[species,[`${species} surprised`,`${species} eating`,`${species} interaction`,`${species} funny expression`]])),
+ dogs:{dogs:['dog confused','dog guilty','dog bath','dog stealing food','dog sleeping awkward','dog surprised','dog muddy','dog head tilt','dogs playing']},
+ cats:{cats:['cat shocked','cat yawning','cat bath','cat stealing food','cat confused','cat sleeping awkward','cat angry','cats arguing','cat hiding']}
+};
+export const GROWTH_PLAN_VERSION='humor-growth-v1';
+export const GROWTH_WEIGHTS={situations:.30,'other-animals':.20,food:.15,objects:.15,dogs:.10,cats:.10};
+export const GROWTH_QUERIES=Object.entries(groups).flatMap(([subject,details])=>Object.entries(details).flatMap(([detail,queries])=>queries.map(query=>({subject,detail,query}))));
+export function growthTasks(maxPages=3){
+ const ordered=[];
+ for(let page=1;page<=maxPages;page++)for(let index=0;index<250;index++)for(const subject of Object.keys(groups)){
+  const tasks=GROWTH_QUERIES.filter(t=>t.subject===subject);
+  // Round-robin finer groups within each subject.
+  const details=Object.keys(groups[subject]);const detail=details[index%details.length],q=Math.floor(index/details.length);
+  const query=tasks.filter(t=>t.detail===detail)[q];if(query)ordered.push({...query,page});
+ }
+ return ordered;
+}
