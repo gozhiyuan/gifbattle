@@ -201,18 +201,15 @@ To exercise KLIPY submission/reporting and attribution, build with the same dumm
 
 ### Meme templates and offline stock import
 
-Make a Meme uses approved stock templates without GIF-provider requests or keys. The separate Our Picks player tab has been removed. The same versioned catalog stores caption settings and source credits.
+Make a Meme uses approved templates without GIF-provider requests or keys. Production loads images and immutable catalog snapshots from Vercel Blob, with a small current-version pointer in Redis. New approved publications appear without redeployment, usually within about 15 seconds. Browsing uses a stable shuffle per player/question; keyword relevance ranks first and page cursors retain the catalog version.
 
-Use `npm run media -- search --source commons --query 'cat yawning' --limit 20`, review the JSON/HTML in `media-work/`, then `npm run media -- import --input media-work/candidates.json --storage static`. Run `npm run media -- validate` before deploying. Pexels search needs the server-only `PEXELS_API_KEY`; Commons needs no key. Static imports are local experiments only. Production uses `MEDIA_CATALOG_SOURCE=blob` with the existing Blob/Redis credentials. `--storage blob` uploads permanent `stock/` assets and syncs an immutable live catalog; new approved templates appear without redeployment. Growing metadata stays in ignored `media-work/catalog.json`; GitHub keeps only a tiny test fixture. Browse order is stably shuffled per player/question, with versioned pagination. A fresh curator checkout should run `npm run media -- catalog-pull` before adding stock.
-
-See [the media-library workflow](docs/media-library.md) for approval fields, manual/original imports, storage, source requirements and meme-template metadata. Search results are pending candidates; source rights must be reviewed before publishing. Make a Meme renders player-written captions using approved templates.
-
+GitHub contains scripts and one tiny cat test fixture. Growing catalog metadata, candidate records, model results and review previews live in ignored `media-work/`; they are not deployed. See the run instructions below and [the complete media workflow](docs/media-library.md).
 
 ### Player-created memes
 
 Make a Meme supports approved captionable templates, live Canvas previews, one/two text captions and submissions into the existing voting flow. The server renders the final image, preserves the source license, and uploads using the existing `BLOB_READ_WRITE_TOKEN`. Caption text/template IDs live in temporary Redis room state; generated images use `memes/`, separate from permanent `stock/`.
 
-Set `CRON_SECRET` in Vercel to enable the daily expired-meme cleanup configured in `vercel.json`. The host can also delete the game's memes with Play Again. Completed and abandoned uploads expire after 24 hours and are deleted on a subsequent successful cleanup run. No AI caption suggestions or permanent player contribution collection is included.
+Set `CRON_SECRET` in Vercel to enable the daily expired-meme cleanup configured in `vercel.json`. The host can also delete the game's memes with Play Again. Completed and abandoned uploads expire after 24 hours and are deleted on a subsequent successful cleanup run. AI suggestions are optional, and players can explicitly opt in to submitting a copy for moderation.
 
 Meme templates load filtered pages from `/api/media/catalog`, rather than downloading the entire manifest into the browser. See [the media workflow](docs/media-library.md) for setup, retention and testing.
 
@@ -224,3 +221,63 @@ Make a Meme supports editable AI suggestions using the host's Gemini key, and an
 ### Question answer modes
 
 The host lobby has **Alternate GIF and Meme rounds**, enabled by default. When on, questions alternate **GIF → Meme**, repeating for longer games. When off, players get **Search GIFs** and **Create Meme** tabs for every question. The setting is stored with the room and retained for Play Again; new rooms default to alternating. Meme questions combine text answers, captioned stock templates and optional AI tools: funnier wording, caption suggestions, or direct meme-image generation. Manual text/captions need no AI key. The host's room Gemini key enables AI. Exhausted GIF quota switches the question to Meme for remaining players; earlier submissions stay intact. An empty template catalog still allows written answers inside Meme mode.
+
+### Running the Commons meme pipeline
+
+Use Node.js **22.13 or later** and install dependencies with `npm ci`. Offline credentials go in gitignored `.env.local`: `GEMINI_MEDIA_API_KEY` for screening, and the existing `BLOB_READ_WRITE_TOKEN` plus `UPSTASH_REDIS_REST_URL`/`UPSTASH_REDIS_REST_TOKEN` for publishing. Commons needs no API key. Pexels collection additionally needs `PEXELS_API_KEY`. Production uses `MEDIA_CATALOG_SOURCE=blob`; the offline scripts keep their working catalog in `media-work/catalog.json`.
+
+On a **fresh curator checkout only**, run `npm run media -- catalog-pull` to download the current approved catalog metadata. It does not download the candidate archive or all stock images. Restore `media-work/` from your own local backup to resume previous collection/screening; otherwise collect a new batch. `catalog-pull` replaces the local working catalog, so back up unpublished changes before using it on an existing workspace.
+
+1. **Prepare the saved collection locally.** On the existing workspace:
+
+   ```sh
+   npm run media -- commons-prepare --input media-work/commons-humor-expanded/candidates.json --out media-work/commons-ready
+   npm run media -- upload-budget --action status
+   ```
+
+   These commands make no external calls. Read `media-work/commons-ready/report.md`. The queue favors humor photos and interactions, reuses current assessments and retains metadata, safety and duplicate holds.
+
+2. **Collect another batch only when needed.** This calls Commons, with pacing, checkpointing and cooldown retries; it makes no Gemini calls or Blob uploads:
+
+   ```sh
+   npm run media -- collect-humor --limit 200 --depth 1 --max-requests 20 --out media-work/commons-next/candidates.json --auto-resume true
+   npm run media -- commons-prepare --input media-work/commons-next/candidates.json --out media-work/commons-ready
+   ```
+
+   Resume collection with the same settings/path. Preparation replaces the generated queue files; import or back up an existing queue before switching to another collection.
+
+3. **Screen a bounded priority batch when Gemini quota/budget is available.** The screen command is billable; the import command only saves local metadata:
+
+   ```sh
+   npm run media -- archive-import --input media-work/commons-ready/screening.json
+   npm run media -- archive-screen --queue media-work/commons-ready/screening.json --limit 50 --max-calls 60 --max-usd 1 --concurrency 2
+   ```
+
+   Re-run the preparation command from step 1 or 2 with the **same collection input** to rebuild the publication shortlist from saved assessments. Completed current assessments are skipped on resume; failed/uncertain images are not automatically approved. Keep one screening/publishing worker running at a time.
+
+4. **Check the publication dry run.** It makes no source requests, model calls, Redis calls or Blob uploads:
+
+   ```sh
+   npm run media -- publish-shortlist --input media-work/commons-ready/publication-candidates.json --sources commons --dry-run true --limit 50
+   ```
+
+   The report shows eligible IDs, diversity/duplicate holds, full-image/preview/catalog upload counts and available allowance. A strong model score alone does not publish an image.
+
+5. **Configure the actual Blob quota window before publishing.** Check Vercel for the reset dates and observed Advanced Operations usage, then replace all placeholders below:
+
+   ```sh
+   npm run media -- upload-budget --action configure --period-start ACTUAL_START_ISO --period-end ACTUAL_END_ISO --quota 2000 --used OBSERVED_USED --reserve 500
+   ```
+
+   The default 500-operation gameplay reserve is configurable. Missing or expired configuration blocks stock uploads. The guard counts subsequent local attempts, including failures, and stops growth before another screening batch when no stock upload allowance remains. It does not monitor account-wide/live gameplay usage; refresh the baseline and leave enough reserve. Storage and download allowances are separate.
+
+6. **Publish approved stock when both checks permit it.** This downloads originals, uploads prepared full images/previews and switches the live catalog after completion:
+
+   ```sh
+   npm run media -- publish-shortlist --input media-work/commons-ready/publication-candidates.json --sources commons --storage blob --min-score 80 --limit 50
+   npm run media -- validate
+   ```
+
+   Production discovers the updated catalog without a code commit or deployment. If only catalog synchronization failed after completed uploads, retry `npm run media -- catalog-sync`; do not rescore the images. Collection and scoring alone never publish files.
+
+The current pipeline remains paused pending available quotas. Nothing starts automatically when the calendar month changes. Detailed policies, metadata evidence limits, local archival and other source workflows are in [media-library.md](docs/media-library.md).

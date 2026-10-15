@@ -21,7 +21,7 @@ export class CandidateArchive {
   return this.transaction(()=>{
    const row=this.db.prepare('SELECT id,data FROM candidates WHERE id=? OR source_url=?').get(candidate.id,source.href);
    const old=row?JSON.parse(row.data):{},id=row?.id||candidate.id;
-   const incoming={...candidate};if(old.aiSuggestions?.safety?.policy===SAFETY_POLICY&&!incoming.aiSuggestions?.safety)delete incoming.aiSuggestions;
+   const incoming={...candidate};if(old.aiSuggestions?.safety?.policy===SAFETY_POLICY&&incoming.aiSuggestions?.safety?.policy!==SAFETY_POLICY)delete incoming.aiSuggestions;
    const data={trainingRights:{status:'unreviewed'},...old,...incoming,id,curatorFlags:[...new Set([...(old.curatorFlags||[]),...(incoming.curatorFlags||[])])]};
    if(old.catalogAsset&&!incoming.catalogAsset)data.catalogAsset=old.catalogAsset;
    this.db.prepare('INSERT INTO candidates VALUES(?,?,?,?) ON CONFLICT(id) DO UPDATE SET data=excluded.data,updated_at=excluded.updated_at').run(id,source.href,JSON.stringify(data),new Date().toISOString());

@@ -1,3 +1,4 @@
+import {assertUploadBudget,UploadBudgetError} from './upload-budget.mjs';
 import {catalogPath} from './catalog-store.mjs';
 import {resolve,dirname} from 'node:path';
 import {readFile,writeFile,mkdir,rename,unlink} from 'node:fs/promises';
@@ -55,6 +56,7 @@ export async function growLibrary(workspace,{target=10000,batchSize=2000,maxUsd=
  state.status='running';await save(statePath,state);let batches=0;
  while(batches<maxBatches){
   let progress=await report();if(!progress.remaining){state.status='target_reached';break;}
+  if(publish===publishShortlist){try{await assertUploadBudget(workspace,3);}catch(error){if(!(error instanceof UploadBudgetError))throw error;state.status='upload_budget_limited';break;}}
   const cohort=`growth-${state.id}-${state.batch}`,leftUsd=maxUsd-progress.estimatedUsd,leftCalls=maxCalls-progress.modelCalls;
   if(leftUsd<.04||leftCalls<1){state.status='budget_limited';break;}
   if(state.phase==='collect'){
@@ -80,7 +82,7 @@ export async function growLibrary(workspace,{target=10000,batchSize=2000,maxUsd=
  if(!(await report()).remaining)state.status='target_reached';else if(state.status==='running')state.status='batch_limit';await save(statePath,state);return await report();
  }finally{archive.close();await unlink(lock);}
 }
-export async function growthCommand(options,workspace){for(const key of ['PEXELS_API_KEY','GEMINI_MEDIA_API_KEY','BLOB_READ_WRITE_TOKEN'])if(!process.env[key])throw new Error(`Set ${key} before starting growth`);const result=await growLibrary(workspace,{target:Number(options.target||10000),batchSize:Number(options['batch-size']||2000),maxUsd:Number(options['max-usd']||100),maxCalls:Number(options['max-calls']||100000),maxBatches:Number(options['max-batches']||100),maxSourceRequests:Number(options['max-source-requests']||100),stateFile:options.state||'media-work/growth/state.json'});console.log(JSON.stringify({...result,queries:Object.keys(result.queries).length}));}
+export async function growthCommand(options,workspace){await assertUploadBudget(workspace,3);for(const key of ['PEXELS_API_KEY','GEMINI_MEDIA_API_KEY','BLOB_READ_WRITE_TOKEN'])if(!process.env[key])throw new Error(`Set ${key} before starting growth`);const result=await growLibrary(workspace,{target:Number(options.target||10000),batchSize:Number(options['batch-size']||2000),maxUsd:Number(options['max-usd']||100),maxCalls:Number(options['max-calls']||100000),maxBatches:Number(options['max-batches']||100),maxSourceRequests:Number(options['max-source-requests']||100),stateFile:options.state||'media-work/growth/state.json'});console.log(JSON.stringify({...result,queries:Object.keys(result.queries).length}));}
 
 export async function growthStatus(workspace,stateFile='media-work/growth/state.json'){
  const statePath=resolve(workspace,stateFile),state=JSON.parse(await readFile(statePath,'utf8'));

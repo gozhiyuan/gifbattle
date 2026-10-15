@@ -1,3 +1,4 @@
+import {commonsPriority} from './commons-priority.mjs';
 import {catalogPath} from './catalog-store.mjs';
 import {readFile,writeFile,mkdir,rename} from 'node:fs/promises';
 import {resolve,dirname} from 'node:path';
@@ -33,6 +34,7 @@ export async function collectHumor({path,limit=120,depth=1,maxRequests=12,roots=
  const ids=new Set([...exclude,...data.candidates].map(c=>c.id)),origins=new Set([...exclude,...data.candidates].map(identity));
  let spent=0;
  while(data.collection.queue.length&&data.candidates.length<limit&&spent<maxRequests){
+  data.collection.queue.sort((a,b)=>commonsPriority({humorSource:{category:b.category}}).score-commonsPriority({humorSource:{category:a.category}}).score);
   const item=data.collection.queue[0];spent++;data.collection.requests++;data.collection.requestsBySource.commons++;await save(path,data);
   let page;
   try{page=await read(item.category,item.continuation,Math.min(20,limit-data.candidates.length));}
@@ -43,7 +45,7 @@ export async function collectHumor({path,limit=120,depth=1,maxRequests=12,roots=
    console.log(`Commons held: ${data.collection.blockedReason}; candidates/checkpoint preserved`);break;
   }throw error;}
   data.collection.fetchedCategories ||= []; if(!data.collection.fetchedCategories.includes(item.category))data.collection.fetchedCategories.push(item.category);
-  for(const candidate of page.candidates){const screen=metadataScreen(candidate);if(!screen.passed){for(const reason of screen.reasons)data.collection.exclusions[reason]=(data.collection.exclusions[reason]||0)+1;continue;}if(ids.has(candidate.id)||origins.has(identity(candidate)))continue;
+  for(const candidate of page.candidates){const screen=metadataScreen(candidate);if(!screen.passed){data.collection.rejectedCandidates ||= {};if(Object.keys(data.collection.rejectedCandidates).length<10000||data.collection.rejectedCandidates[candidate.id])data.collection.rejectedCandidates[candidate.id]={candidate,reasons:screen.reasons};else data.collection.rejectedEvidenceTruncated=true;for(const reason of screen.reasons)data.collection.exclusions[reason]=(data.collection.exclusions[reason]||0)+1;continue;}if(ids.has(candidate.id)||origins.has(identity(candidate)))continue;
    ids.add(candidate.id);origins.add(identity(candidate));data.candidates.push({...candidate,categories:[],collectionCategory:'humor',humorSource:{root:item.root,category:item.category,depth:item.depth},sourceScreen:screen,reviewStatus:'pending'});
   }
   data.collection.queue.shift();
