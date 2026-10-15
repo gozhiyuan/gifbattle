@@ -6,9 +6,9 @@ export function normalizeCaptions(value: unknown, layout: CaptionLayout, limit: 
   if (!captions.some(Boolean) || captions.some(text => text.length > limit || /[\x00-\x08\x0e-\x1f]/.test(text))) throw new Error('Enter a caption within the template limit');
   return captions;
 }
-// Shared geometry for the browser Canvas preview and server SVG overlay.
+// Shared geometry for the browser Canvas preview and server text overlays.
 export function captionLines(width: number, height: number, captions: string[], layout: CaptionLayout): CaptionLine[] {
-  const padding = width * 0.04;
+  const padding = Math.min(width, height) * 0.04;
   const availableWidth = width - padding * 2;
   const wrap = (text: string, size: number) => {
     const lines: string[] = []; let line = '';
@@ -29,7 +29,7 @@ export function captionLines(width: number, height: number, captions: string[], 
     if (!text.trim()) return [];
     let size = Math.min(width * 0.07, height * 0.12);
     let lines = wrap(text, size);
-    while (lines.length * size * 1.2 > height * 0.34 && size > width * 0.012) { size *= 0.9; lines = wrap(text, size); }
+    while (lines.length * size * 1.2 > height * (captions.filter(text => text.trim()).length === 1 ? 0.48 : 0.34) && size > width * 0.012) { size *= 0.9; lines = wrap(text, size); }
     const bottom = layout === 'bottom' || index === 1;
     const startY = bottom ? height - padding - (lines.length - 1) * size * 1.2 - size * 0.2 : padding + size;
     return lines.map((text, row) => ({ text, x: width / 2, y: startY + row * size * 1.2, fontSize: size, strokeWidth: Math.max(1, size * 0.085) }));

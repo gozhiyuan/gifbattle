@@ -12,6 +12,7 @@ const CREDENTIAL_TTL_SECS = 86400;
 type RoomPlayer = { id: string; nickname?: string };
 
 export type RoomState = {
+  geminiModel?: string;
   phase?: string;
   submitDeadline?: number;
   prompts?: string[];

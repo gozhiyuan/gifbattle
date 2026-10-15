@@ -4,13 +4,14 @@ import {
   getRoomGeminiKey,
   authorizeRoomPlayer,
 } from "@/lib/room-security";
+import { promptIdentity } from "@/lib/game-prompts";
 import { fetchWithRetry } from "@/lib/gemini-retry";
 
 export const maxDuration = 30;
 
-const DEFAULT_MODEL = "gemini-3.5-flash";
+const DEFAULT_MODEL = "gemini-3.8-flash";
 const ALLOWED_MODELS = new Set([
-  "gemini-3.5-flash",
+  "gemini-3.8-flash",
   "gemini-3.6-flash",
 ]);
 
@@ -188,14 +189,11 @@ export async function POST(req: NextRequest) {
         .join("\n")
         .trim();
       if (!text) continue;
-      const prompts = tryParsePromptArray(text);
-      if (prompts.length > 0) {
-        return NextResponse.json({ prompts });
-      }
-      const linePrompts = tryParsePromptLines(text);
-      if (linePrompts.length > 0) {
-        return NextResponse.json({ prompts: linePrompts });
-      }
+      const existing = new Set(promptSeeds.map(promptIdentity));
+      const unique = (prompts: string[]) => Array.from(new Map(prompts.filter(p => !existing.has(promptIdentity(p))).map(p => [promptIdentity(p), p])).values());
+      const parsed = tryParsePromptArray(text);
+      const prompts = unique(parsed.length ? parsed : tryParsePromptLines(text)).slice(0, 6);
+      if (prompts.length > 0) return NextResponse.json({ prompts });
     }
 
     return NextResponse.json({ error: "generation_failed" }, { status: 502 });

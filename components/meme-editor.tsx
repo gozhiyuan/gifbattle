@@ -40,7 +40,7 @@ export function MemeEditor({ template, code, pid, gameId, roundIndex, token, onS
     context.drawImage(source, 0, 0, element.width, element.height);
     context.textAlign = 'center'; context.lineJoin = 'round';
     captionLines(element.width, element.height, captions.map(text => text.replace(/\s+/g, ' ').trim()), layout).forEach(line => {
-      context.font = `bold ${line.fontSize}px Arial, sans-serif`;
+      context.font = `bold ${line.fontSize}px "Meme Caption", sans-serif`;
       context.lineWidth = line.strokeWidth; context.strokeStyle = 'black'; context.fillStyle = 'white';
       context.strokeText(line.text, line.x, line.y); context.fillText(line.text, line.x, line.y);
     });
@@ -49,7 +49,13 @@ export function MemeEditor({ template, code, pid, gameId, roundIndex, token, onS
     let active = true;
     setReady(false); setError(''); image.current = null;
     const source = new Image(); source.crossOrigin = 'anonymous';
-    source.onload = () => { if (active) { image.current = source; setReady(true); } };
+    source.onload = async () => {
+      try {
+        const font = new FontFace('Meme Caption', 'url(/fonts/NotoSans-Bold.ttf)', { weight: '700' });
+        document.fonts.add(await font.load());
+        if (active) { image.current = source; setReady(true); }
+      } catch { if (active) setError('The caption font could not load. Please retry.'); }
+    };
     source.onerror = () => { if (active) setError('This template could not load. Choose another template.'); };
     source.src = template.displayUrl;
     return () => { active = false; };

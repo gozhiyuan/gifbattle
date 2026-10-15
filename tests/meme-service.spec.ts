@@ -80,3 +80,22 @@ test('meme cleanup preserves stock and other hosts; failed deletions keep expiry
   await expect(deleteTrackedMemes([meme], async () => { throw new Error('Blob unavailable'); }, async () => { forgot = true; })).rejects.toThrow();
   expect(forgot).toBe(false);
 });
+
+test('long captions render readable glyphs with the bundled font', async () => {
+ const caption = 'When I said one more snack I meant the entire fridge and now the cat is judging my life choices from the kitchen counter';
+ const lines = captionLines(template.width, template.height, [caption], 'bottom');
+ expect(lines.length).toBeGreaterThan(1);
+ expect(lines.every(line => line.fontSize >= template.width * 0.035)).toBe(true);
+ const result = await renderMeme(template, [caption]);
+ await writeFile('/tmp/gifbattle-long-meme.webp', result.image);
+ const original = await sharp(`public${template.url}`).ensureAlpha().raw().toBuffer();
+ const rendered = await sharp(result.image).ensureAlpha().raw().toBuffer();
+ // The lower caption area must contain substantial white letter strokes.
+ let white = 0, outline = 0;
+ for(let i = Math.floor(rendered.length * 0.65 / 4) * 4; i < rendered.length; i += 4) {
+  if(rendered[i]>235 && rendered[i+1]>235 && rendered[i+2]>235 && original[i]<210) white++;
+  if(rendered[i]<35 && rendered[i+1]<35 && rendered[i+2]<35 && original[i]>100 && original[i+1]>100 && original[i+2]>100) outline++;
+ }
+ expect(white).toBeGreaterThan(1000);
+ expect(outline).toBeGreaterThan(1000);
+});
