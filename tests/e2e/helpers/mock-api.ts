@@ -1,4 +1,5 @@
 import type { BrowserContext, Request, Route } from "@playwright/test";
+import { normalizeQuestionTopics, questionTopicsRejection } from "../../../lib/questions";
 import { voteKey, voteRejection } from "../../../lib/votes";
 import { isValidPlayerId } from "../../../lib/player-id";
 
@@ -173,7 +174,11 @@ const handleRoomStateRequest = async (
   const players = Array.isArray(room.players) ? room.players as Array<Record<string, unknown>> : [];
   if (!players.some((p) => p["id"] === pid)) return json(route, 403, { error: "forbidden" });
 
-  store.set(key, state);
+  const parsed = JSON.parse(state);
+  const topicError = questionTopicsRejection(room, pid, parsed.questionTopics);
+  if (topicError) return json(route, topicError === 'host_only_setting' ? 403 : topicError === 'question_topics_locked' ? 409 : 400, { error: topicError });
+  parsed.questionTopics = normalizeQuestionTopics(parsed.questionTopics === undefined ? room.questionTopics : parsed.questionTopics);
+  store.set(key, JSON.stringify(parsed));
   return json(route, 200, { ok: true });
 };
 
@@ -228,6 +233,8 @@ export const installGameApiMocks = async (
   context: BrowserContext,
   store: Map<string, string>
 ) => {
+  // Gameplay checks should not wait for an external font stylesheet.
+  await context.route('https://fonts.googleapis.com/**', route => route.fulfill({ contentType: 'text/css', body: '' }));
   const roomTokens = new Map<string, string>();
   await context.route('**/api/media/events', route => json(route, 200, { ok: true }));
   await context.route(`**${STORE_PATH}**`, (route, request) =>

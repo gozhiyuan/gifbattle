@@ -64,6 +64,7 @@ export async function POST(req: NextRequest) {
       alternateModes: true,
       namePromptRounds: 1,
       customPrompts: [],
+      questionTopics: [],
     };
 
     const key = `gifbattle:room:${code}`;

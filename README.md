@@ -218,6 +218,10 @@ Meme templates load filtered pages from `/api/media/catalog`, rather than downlo
 Make a Meme supports editable AI suggestions using the host's Gemini key, and an optional sharing checkbox that queues a permanent copy for review. Offline `media collect`, `tag`, `generate` and `moderate` commands cover sourcing, AI metadata proposals, original image drafts, approval/export and exposure-aware usage stats. Configure `GEMINI_MEDIA_API_KEY` only for offline AI work and `MEDIA_ADMIN_SECRET` for moderation. Reuse the existing Blob token and Redis configuration. See [the complete stock workflow](docs/media-library.md).
 
 
+### Question topics and featured questions
+
+The library contains 1,000 reviewed questions across eight topics, including 200 featured picks that appear more often. Hosts can select multiple topics in the lobby or keep All topics. The lobby shows matching counts; custom questions and player-name rounds are included separately. Topic choices persist through Play Again. See [question library and sampling](docs/question-library.md) for the editorial review, topic behavior and repeat handling.
+
 ### Question answer modes
 
 The host lobby has **Alternate GIF and Meme rounds**, enabled by default. When on, questions alternate **GIF → Meme**, repeating for longer games. When off, players get **Search GIFs** and **Create Meme** tabs for every question. The setting is stored with the room and retained for Play Again; new rooms default to alternating. Meme questions combine text answers, captioned stock templates and optional AI tools: funnier wording, caption suggestions, or direct meme-image generation. Manual text/captions need no AI key. The host's room Gemini key enables AI. Exhausted GIF quota switches the question to Meme for remaining players; earlier submissions stay intact. An empty template catalog still allows written answers inside Meme mode.

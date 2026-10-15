@@ -1,6 +1,7 @@
 import { Redis } from "@upstash/redis";
 import { NextRequest, NextResponse } from "next/server";
 import { ANSWER_MODE_POLICY, CHOICE_MODE_POLICY, validSubmissionModes } from '@/lib/answer-modes';
+import { normalizeQuestionTopics, questionTopicsRejection } from "@/lib/questions";
 import {SAVE_ROOM_HOST_SCRIPT} from '@/lib/host-presence';
 import {
   ACTIVE_ROOM_TTL_SECS,
@@ -65,6 +66,10 @@ export async function POST(req: NextRequest) {
   if ("geminiKey" in parsedState) {
     delete parsedState.geminiKey;
   }
+
+  const topicError = questionTopicsRejection(room, pid, parsedState.questionTopics);
+  if (topicError) return NextResponse.json({ error: topicError }, { status: topicError === 'host_only_setting' ? 403 : topicError === 'question_topics_locked' ? 409 : 400 });
+  parsedState.questionTopics = normalizeQuestionTopics(parsedState.questionTopics === undefined ? room.questionTopics : parsedState.questionTopics);
 
   if (room.phase === 'lobby' && parsedState.alternateModes !== room.alternateModes && room.host !== pid)
     return NextResponse.json({error:'host_only_setting'},{status:403});
