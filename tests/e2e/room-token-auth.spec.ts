@@ -38,3 +38,24 @@ test("host key and prompt requests carry the room token", async ({ context, page
   await expect.poll(() => promptBodies.length).toBe(1);
   expect(promptBodies[0]).toMatchObject({ roomCode: code, token });
 });
+
+test("rejoining under an existing player ID needs that player's token", async ({ context, page }) => {
+  const store = new Map<string, string>();
+  await installGameApiMocks(context, store);
+  await page.goto("/");
+  await page.getByPlaceholder("Your nickname").fill("Host");
+  await page.getByRole("button", { name: /create room/i }).click();
+  await expect(page.getByText("LOBBY", { exact: true })).toBeVisible();
+  const code = await page.evaluate(() => localStorage.getItem("gifbattle_last_room")!);
+  const host = JSON.parse(store.get(`gifbattle:room:${code}`)!).host;
+  const token = await page.evaluate(c => localStorage.getItem(`gifbattle_room_token:${c}`), code);
+
+  const attempt = (body: Record<string, unknown>) => page.evaluate(async b => {
+    const res = await fetch("/api/room/join", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(b) });
+    return { status: res.status, body: await res.json() };
+  }, body);
+  // The host's ID is readable from room state; knowing it must not yield a token
+  expect(await attempt({ code, pid: host, nickname: "Imposter" })).toMatchObject({ status: 409, body: { error: "already_joined" } });
+  expect(await attempt({ code, pid: host, nickname: "Imposter", token: "guessed" })).toMatchObject({ status: 409 });
+  expect(await attempt({ code, pid: host, nickname: "Host", token })).toMatchObject({ status: 200, body: { token } });
+});

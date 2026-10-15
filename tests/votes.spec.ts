@@ -3,14 +3,19 @@ import { VOTE_DEADLINE_GRACE_MS, voteKey, voteRejection } from "../lib/votes";
 
 const now = 1_000_000;
 const room = () => ({
-  phase: "voting", votingRound: 1, currentMatchup: 0, matchups: [["a", "b"], ["c", "d"]],
+  phase: "voting", submitDeadline: 900_000, votingRound: 1, currentMatchup: 0, matchups: [["a", "b"], ["c", "d"]],
   voteDeadline: now + 10_000, players: [{ id: "a" }, { id: "b" }, { id: "c" }, { id: "d" }, { id: "v" }],
 });
 
 test("an eligible voter can vote on the open matchup", () => {
   expect(voteRejection(room(), "v", 1, 0, "left", now)).toBeNull();
   expect(voteRejection(room(), "c", 1, 0, "right", now)).toBeNull();
-  expect(voteKey("ABC123", 1, 0, "v")).toBe("gifbattle:vote:ABC123:1:0:v");
+});
+
+test("vote keys are scoped to the game so Play Again starts with no votes", () => {
+  expect(voteKey("ABC123", 900_000, 1, 0, "v")).toBe("gifbattle:vote:ABC123:900000:1:0:v");
+  expect(voteKey("ABC123", 900_000, 0, 0, "v")).not.toBe(voteKey("ABC123", 950_000, 0, 0, "v"));
+  expect(voteRejection({ ...room(), submitDeadline: null }, "v", 1, 0, "left", now)).toBe("voting_closed");
 });
 
 test("contestants and non-players cannot vote", () => {

@@ -20,7 +20,8 @@ export async function POST(req: NextRequest) {
   if (rejection === "not_eligible") return NextResponse.json({ error: rejection }, { status: 403 });
   if (rejection) return NextResponse.json({ error: rejection }, { status: 409 });
 
-  const result = await recordRoomVote(voteKey(code, round, matchup, pid), side);
+  // The game ID comes from the stored room, never from the request
+  const result = await recordRoomVote(voteKey(code, room.submitDeadline as number, round, matchup, pid), side);
   if (result === "conflict") return NextResponse.json({ error: "already_voted" }, { status: 409 });
   return NextResponse.json({ ok: true });
 }

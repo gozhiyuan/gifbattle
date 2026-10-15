@@ -11,6 +11,7 @@ import { safeHttps } from "@/lib/media/catalog-schema.cjs";
 
 import { hostGraceMs, heartbeatIsFresh } from "@/lib/host-presence";
 import { getRoomToken, setRoomToken, clearRoomToken } from "@/lib/room-token";
+import { voteKey } from "@/lib/votes";
 import { ANSWER_MODE_POLICY, CHOICE_MODE_POLICY, getAnswerMode, modeForCycle, answerModeLabels, isChoiceMode, submissionAllowedForQuestion } from "@/lib/answer-modes";
 import { MediaResult, RemoteProvider, ProviderError } from "@/lib/media/types";
 import { enabledProviders, primaryProvider, providerLabels } from "@/lib/media/provider-config";
@@ -471,7 +472,7 @@ const getStablePid = () => {
 const TAB_ID = getStablePid();
 
 const rKey = c => `gifbattle:room:${c}`;
-const vKey = (c, round, mi, pid) => `gifbattle:vote:${c}:${round}:${mi}:${pid}`;
+const vKey = (c, gameId, round, mi, pid) => voteKey(c, gameId, round, mi, pid);
 const hbKey = c => `gifbattle:hb:${c}`;
 
 // ── KV storage shim — read-only view of /api/store (writes go through token-checked routes) ──
@@ -1010,7 +1011,7 @@ export default function App() {
           const res = await fetch("/api/room/join", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ code: c, pid, nickname: nick.trim() }),
+            body: JSON.stringify({ code: c, pid, nickname: nick.trim(), token: getRoomToken(c) }),
           });
           if (res.status === 404) return setErr("Room not found");
           if (res.status === 409) {
@@ -1018,6 +1019,7 @@ export default function App() {
             try { d = await res.json(); } catch {}
             if (d.error === "not_in_lobby") return setErr("Game already in progress");
             if (d.error === "room_full") return setErr("Room is full");
+            if (d.error === "already_joined") return setErr("You're already in this room from another browser. Rejoin from that browser.");
             return setErr("Cannot join this room");
           }
           if (res.status === 429) {
@@ -1109,7 +1111,7 @@ export default function App() {
     const [lId, rId] = state.matchups[mi];
     let lv=0, rv=0;
     for (const p of state.players) {
-      try { const r=await storage.get(vKey(state.code, state.votingRound, mi, p.id)); if(r){if(r.value==="left")lv++;else rv++;} } catch {}
+      try { const r=await storage.get(vKey(state.code, state.submitDeadline, state.votingRound, mi, p.id)); if(r){if(r.value==="left")lv++;else rv++;} } catch {}
     }
     const rwins: Record<string, number> = { ...state.roundMatchupWins };
     if (lv>rv) rwins[lId]=(rwins[lId]||0)+1;
@@ -2278,7 +2280,7 @@ function Voting({ gs, pid, code, isHost, fetchGs, writeGs, transitioning, advanc
 
   useEffect(()=>{
     let active=true;
-    storage.get(vKey(code, gs.votingRound, mi, pid)).then(r=>{if(active&&r)setMyVote(r.value);}).catch(()=>{});
+    storage.get(vKey(code, gs.submitDeadline, gs.votingRound, mi, pid)).then(r=>{if(active&&r)setMyVote(r.value);}).catch(()=>{});
     return()=>{active=false;};
   },[mi, gs.votingRound]);
 
@@ -2293,7 +2295,7 @@ function Voting({ gs, pid, code, isHost, fetchGs, writeGs, transitioning, advanc
         if(!showRes){
           let l=0,r2=0;
           for(const p of gs.players){
-            try{const res=await storage.get(vKey(code, gs.votingRound, mi, p.id));if(res){if(res.value==="left")l++;else r2++;}}catch{}
+            try{const res=await storage.get(vKey(code, gs.submitDeadline, gs.votingRound, mi, p.id));if(res){if(res.value==="left")l++;else r2++;}}catch{}
           }
           setLv(l);setRv(r2);setShowRes(true);
           if(isHost&&!advRef.current&&!transitioning.current){
@@ -2332,7 +2334,7 @@ function Voting({ gs, pid, code, isHost, fetchGs, writeGs, transitioning, advanc
       // already_voted means this player's vote is on record (e.g. from another tab); show it as cast
       const data = await res.json().catch(() => ({}));
       if (data?.error === "already_voted") {
-        const existing = await storage.get(vKey(code, gs.votingRound, mi, pid)).catch(() => null);
+        const existing = await storage.get(vKey(code, gs.submitDeadline, gs.votingRound, mi, pid)).catch(() => null);
         if (existing?.value) setMyVote(existing.value);
       }
       return;
@@ -2346,7 +2348,7 @@ function Voting({ gs, pid, code, isHost, fetchGs, writeGs, transitioning, advanc
     if (voterIds.length > 0) {
       let allDone = true;
       for (const vid of voterIds) {
-        try { const r = await storage.get(vKey(code, gs.votingRound, mi, vid)); if (!r) { allDone = false; break; } }
+        try { const r = await storage.get(vKey(code, gs.submitDeadline, gs.votingRound, mi, vid)); if (!r) { allDone = false; break; } }
         catch { allDone = false; break; }
       }
       if (allDone) await writeGs({ ...gs, voteDeadline: Date.now() - 1000 });

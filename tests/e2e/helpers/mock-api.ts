@@ -48,7 +48,7 @@ const handleVoteRequest = async (route: Route, request: Request, store: Map<stri
   const room = raw ? JSON.parse(raw) : null;
   const rejection = voteRejection(room, body.pid!, body.round, body.matchup, body.side, Date.now());
   if (rejection) return json(route, rejection === "invalid_request" ? 400 : rejection === "not_eligible" ? 403 : 409, { error: rejection });
-  const key = voteKey(code, body.round!, body.matchup!, body.pid!);
+  const key = voteKey(code, room.submitDeadline, body.round!, body.matchup!, body.pid!);
   if (store.has(key) && store.get(key) !== body.side) return json(route, 409, { error: "already_voted" });
   store.set(key, body.side!);
   return json(route, 200, { ok: true });
@@ -110,7 +110,7 @@ const handleRoomJoinRequest = async (
   roomTokens: Map<string, string>
 ) => {
   if (request.method() !== "POST") return json(route, 405, { error: "method_not_allowed" });
-  const body = request.postDataJSON() as { code?: unknown; pid?: unknown; nickname?: unknown };
+  const body = request.postDataJSON() as { code?: unknown; pid?: unknown; nickname?: unknown; token?: unknown };
   const code = typeof body?.code === "string" ? body.code.trim().toUpperCase() : "";
   const pid = typeof body?.pid === "string" ? body.pid : "";
   const nickname = typeof body?.nickname === "string" ? body.nickname.trim() : "";
@@ -127,9 +127,9 @@ const handleRoomJoinRequest = async (
 
   const players = Array.isArray(room.players) ? room.players as Array<Record<string, unknown>> : [];
   if (players.find((p) => p["id"] === pid)) {
-    const token = `tok_${code}_${pid}`;
-    roomTokens.set(`${code}:${pid}`, token);
-    return json(route, 200, { ok: true, code, token });
+    // Mirrors the real route: no new token for an existing player without their current one
+    if (!hasRoomToken(roomTokens, code, pid, body?.token)) return json(route, 409, { error: "already_joined" });
+    return json(route, 200, { ok: true, code, token: body.token });
   }
 
   if (players.length >= 12) return json(route, 409, { error: "room_full" });
