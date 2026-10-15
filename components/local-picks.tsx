@@ -14,7 +14,7 @@ export function LocalPicks({ onSubmit, colors, styles, captionableOnly = false, 
   onExposure?: (ids: string[]) => void;
   onUnavailable?: () => Promise<void>;
   renderSelection?: (item: MediaResult) => ReactNode;
-  colors: { card2: string; text: string; muted: string; accent: string };
+  colors: { bg: string; card2: string; text: string; muted: string; accent: string };
   styles: Record<string, CSSProperties>;
 }) {
   const [internalQuery, setQuery] = useState('');
@@ -79,7 +79,7 @@ export function LocalPicks({ onSubmit, colors, styles, captionableOnly = false, 
     <div style={{ fontSize: 12, color: colors.muted, marginBottom: 12 }}>{captionableOnly ? "Choose an image for your caption, or submit text only." : "Browse our collection of reaction images and animations."}</div>
     <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginBottom: 12 }}>
       {['All', ...STOCK_CATEGORIES.map(category => category.label)].map(label => <button key={label} disabled={disabled} onClick={() => choose(label === 'All' ? '' : label.toLowerCase())}
-        style={{ ...styles.btnSm, background: category === (label === 'All' ? '' : label.toLowerCase()) ? colors.accent : colors.card2, color: category === (label === 'All' ? '' : label.toLowerCase()) ? '#fff' : colors.text }}>{label}</button>)}
+        style={{ ...styles.btnSm, background: category === (label === 'All' ? '' : label.toLowerCase()) ? colors.text : colors.card2, color: category === (label === 'All' ? '' : label.toLowerCase()) ? colors.bg : colors.text }}>{label}</button>)}
     </div>
     {error ? <div role="alert" style={styles.err}>{error}</div> : loading && !items.length ? <div style={styles.info}>Loading templates…</div> : !items.length ?
       <div style={styles.info}>{query || category ? 'No matching picks. Try another category or search.' : 'Meme templates are being prepared. You can still submit text only or generate an image with AI.'}</div> :

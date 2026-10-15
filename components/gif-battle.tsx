@@ -524,29 +524,31 @@ type Submission = {
 };
 
 // ── Styles ────────────────────────────────────────────────────────────────────
-const DARK = { bg:"#07070e", card:"#0d0d1e", card2:"#13132a", accent:"#ff2979", cyan:"#00e5ff", text:"#eaeaff", muted:"#484878", green:"#00ff88", yellow:"#ffcc00" };
-const LIGHT = { bg:"#f7f7ff", card:"#ffffff", card2:"#eeeef8", accent:"#e8005a", cyan:"#007aa8", text:"#1a1a30", muted:"#6b6b8f", green:"#007a3d", yellow:"#b38000" };
-const FONT_DISPLAY = "'Bebas Neue', sans-serif";
+// Fight-card palette: warm ink neutrals, red corner (left answer) vs blue corner (right answer),
+// and poster yellow (hi) reserved for primary actions and the VS stamp.
+const DARK = { bg:"#14120F", card:"#1D1A16", card2:"#28241F", accent:"#E2402F", blue:"#4A80F0", text:"#F2EDE4", muted:"#8A8278", green:"#52B86E", yellow:"#F2B935", hi:"#FFC93C", onHi:"#14120F" };
+const LIGHT = { bg:"#E9E7E3", card:"#FAFAF8", card2:"#E0DDD8", accent:"#C8321F", blue:"#1F5BD1", text:"#1A1714", muted:"#6B655D", green:"#1E7A3E", yellow:"#946400", hi:"#FFC93C", onHi:"#14120F" };
+const FONT_DISPLAY = "'Big Shoulders Display', 'Arial Narrow', sans-serif";
 const FONT_MONO = "'Space Mono', monospace";
 const FONT_BODY = "'DM Sans', system-ui, sans-serif";
 const makeStyles = (C: typeof DARK): Record<string, CSSProperties> => ({
   page: { minHeight:"100vh", background:C.bg, color:C.text, fontFamily:FONT_BODY, display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"center", padding:"20px" },
   pageTop: { minHeight:"100vh", background:C.bg, color:C.text, fontFamily:FONT_BODY, display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"flex-start", padding:"20px 20px 40px" },
-  card: { background:C.card, borderRadius:16, padding:"28px 32px", width:"100%", maxWidth:500, boxShadow:`0 0 0 1px ${C.muted}28, 0 28px 70px rgba(0,0,0,0.7)`, border:`1px solid ${C.muted}28` },
-  wCard: { background:C.card, borderRadius:16, padding:"28px 32px", width:"100%", maxWidth:820, boxShadow:`0 0 0 1px ${C.muted}28, 0 28px 70px rgba(0,0,0,0.7)`, border:`1px solid ${C.muted}28` },
-  h1: { fontSize:52, fontWeight:900, margin:"0 0 4px", fontFamily:FONT_DISPLAY, letterSpacing:3, display:"inline-block", background:`linear-gradient(135deg, ${C.accent}, #ff8800 50%, ${C.accent})`, backgroundClip:"text", WebkitBackgroundClip:"text", WebkitTextFillColor:"transparent", lineHeight:1 },
+  card: { background:C.card, borderRadius:16, padding:"28px 32px", width:"100%", maxWidth:500, boxShadow:"none", border:`1px solid ${C.muted}33` },
+  wCard: { background:C.card, borderRadius:16, padding:"28px 32px", width:"100%", maxWidth:820, boxShadow:"none", border:`1px solid ${C.muted}33` },
+  h1: { fontSize:56, fontWeight:800, margin:"0 0 4px", fontFamily:FONT_DISPLAY, letterSpacing:1, display:"inline-block", color:C.text, lineHeight:1, textTransform:"uppercase" },
   h2: { fontSize:28, fontWeight:900, margin:"0 0 14px", fontFamily:FONT_DISPLAY, letterSpacing:2, color:C.text },
   sub: { color:C.muted, marginBottom:24, fontSize:14, letterSpacing:0.3 },
   inp: { width:"100%", padding:"13px 16px", borderRadius:10, border:`1px solid ${C.muted}55`, background:C.card2, color:C.text, fontSize:15, marginBottom:12, outline:"none", fontFamily:FONT_BODY },
   btn: { padding:"14px 24px", borderRadius:10, border:"none", cursor:"pointer", fontSize:15, fontWeight:700, display:"block", width:"100%", marginBottom:10, fontFamily:FONT_BODY, letterSpacing:0.4 },
-  btnP: { background:`linear-gradient(135deg, ${C.accent}, #c01550)`, color:"#fff", boxShadow:`0 4px 24px ${C.accent}44` },
+  btnP: { background:C.hi, color:C.onHi },
   btnS: { background:C.card2, color:C.text, border:`1px solid ${C.muted}55` },
   btnSm: { padding:"8px 14px", borderRadius:8, border:"none", cursor:"pointer", fontSize:13, fontWeight:700, fontFamily:FONT_BODY },
   err: { color:C.accent, fontSize:13, marginBottom:12, padding:"10px 14px", background:`${C.accent}11`, borderRadius:8, border:`1px solid ${C.accent}33` },
   info: { color:C.muted, fontSize:13, marginBottom:12, padding:"10px 14px", background:C.card2, borderRadius:8 },
   divider: { textAlign:"center", color:C.muted, margin:"14px 0", fontSize:13 },
   row: { display:"flex", gap:10, alignItems:"center" },
-  timer: { fontWeight:900, textAlign:"center", lineHeight:1, fontFamily:FONT_MONO },
+  timer: { fontWeight:700, textAlign:"center", lineHeight:1, fontFamily:FONT_MONO, fontVariantNumeric:"tabular-nums" },
   prompt: { fontSize:21, fontWeight:600, textAlign:"center", lineHeight:1.5, padding:"16px 0", color:C.text, fontFamily:FONT_BODY },
   badge: { display:"inline-block", padding:"3px 10px", borderRadius:20, fontSize:10, fontWeight:700, letterSpacing:1 },
   pRow: { display:"flex", justifyContent:"space-between", alignItems:"center", padding:"11px 14px", background:C.card2, borderRadius:10, marginBottom:8, border:`1px solid ${C.muted}22` },
@@ -1177,7 +1179,7 @@ export default function App() {
       {notice && (
         <div role="status" style={{
           position:"fixed", top:16, left:"50%", transform:"translateX(-50%)",
-          zIndex:1000, background:C.card2, color:C.text, border:`1px solid ${C.cyan}66`,
+          zIndex:1000, background:C.card2, color:C.text, border:`1px solid ${C.blue}66`,
           borderRadius:10, padding:"10px 14px", boxShadow:"0 6px 22px rgba(0,0,0,0.25)",
           fontSize:13, maxWidth:460, width:"calc(100% - 40px)", textAlign:"center",
         }}>
@@ -1209,7 +1211,7 @@ function ThemeToggle() {
   const icon: Record<ThemeMode, string> = { dark:"🌙", light:"☀️", auto:"🖥️" };
   const next: Record<ThemeMode, ThemeMode> = { auto:"dark", dark:"light", light:"auto" };
   return (
-    <button className="gbtn" title={`Theme: ${themeMode}`}
+    <button className="gbtn theme-toggle" title={`Theme: ${themeMode}`} aria-label={`Theme: ${themeMode}. Switch to ${next[themeMode]}`}
       onClick={() => setThemeMode(next[themeMode])}
       style={{ position:"fixed", bottom:16, right:16, zIndex:1000,
         background:C.card2, border:`1px solid ${C.muted}44`,
@@ -1231,7 +1233,7 @@ function MissingGiphyConfig() {
         <div style={g.sub}>GIF search is not configured for this deployment</div>
         <div style={{background:C.card2,borderRadius:12,padding:"14px 16px",marginBottom:16,fontSize:13,lineHeight:1.9,color:C.muted,border:`1px solid ${C.muted}22`}}>
           <div style={{color:C.text,fontWeight:700,marginBottom:6,fontSize:14}}>Fix deployment config:</div>
-          1. Add a provider key, e.g. <code style={{background:`${C.cyan}18`,color:C.cyan,padding:"1px 6px",borderRadius:4,fontSize:11}}>NEXT_PUBLIC_GIPHY_KEY</code><br/>
+          1. Add a provider key, e.g. <code style={{background:`${C.blue}18`,color:C.blue,padding:"1px 6px",borderRadius:4,fontSize:11}}>NEXT_PUBLIC_GIPHY_KEY</code><br/>
           2. Redeploy the app<br/>
           <div style={{marginTop:8,fontSize:12,color:C.muted}}>
             Configure NEXT_PUBLIC_GIPHY_KEY or NEXT_PUBLIC_KLIPY_KEY to enable GIF search.
@@ -1249,9 +1251,9 @@ function HomeScreen({ nick, setNick, joinIn, setJoinIn, err, setErr, onCreate, o
     <div style={g.page}>
       <div style={{...g.card,position:"relative"}}>
         <div style={{textAlign:"center", marginBottom:28}}>
-          <div style={{fontSize:72, fontWeight:900, fontFamily:"'Bebas Neue', sans-serif", letterSpacing:5, display:"inline-block",
-            color:C.text, lineHeight:1, marginBottom:6, textShadow:`0 2px 0 ${C.bg}, 0 0 28px ${C.accent}55`}}>
-            GIF BATTLES
+          <div style={{fontSize:84, fontWeight:800, fontFamily:FONT_DISPLAY, letterSpacing:1, display:"inline-block",
+            color:C.text, lineHeight:0.9, marginBottom:10}}>
+            <span style={{color:C.accent}}>GIF</span> BATTLES
           </div>
           <div style={{color:C.muted, fontSize:11, letterSpacing:5, fontWeight:600}}>CREATE · VOTE · GLORY</div>
           <div style={{marginTop:12,color:C.muted,fontSize:13,lineHeight:1.6}}>
@@ -1286,15 +1288,15 @@ function HomeScreen({ nick, setNick, joinIn, setJoinIn, err, setErr, onCreate, o
         </div>
         <div style={{marginTop:12,textAlign:"center",fontSize:12,color:C.muted,lineHeight:1.6}}>
           Questions or suggestions? Open an{" "}
-          <a href="https://github.com/gozhiyuan/gifbattle/issues" target="_blank" rel="noreferrer" style={{color:C.cyan,textDecoration:"underline"}}>
+          <a href="https://github.com/gozhiyuan/gifbattle/issues" target="_blank" rel="noreferrer" style={{color:C.blue,textDecoration:"underline"}}>
             issue
           </a>
           {" "}or submit a{" "}
-          <a href="https://github.com/gozhiyuan/gifbattle/pulls" target="_blank" rel="noreferrer" style={{color:C.cyan,textDecoration:"underline"}}>
+          <a href="https://github.com/gozhiyuan/gifbattle/pulls" target="_blank" rel="noreferrer" style={{color:C.blue,textDecoration:"underline"}}>
             PR
           </a>
           {" · "}
-          <a href="/privacy" style={{color:C.cyan,textDecoration:"underline"}}>
+          <a href="/privacy" style={{color:C.blue,textDecoration:"underline"}}>
             Privacy
           </a>
           .
@@ -1533,20 +1535,16 @@ function Lobby({ gs, pid, code, isHost, startGame, leave, writeGs }) {
         <div style={{
           ...g.h1,
           marginBottom: 4,
-          background: "none",
-          color: C.text,
-          WebkitTextFillColor: C.text,
-          textShadow: `0 2px 0 ${C.bg}, 0 0 28px ${C.accent}55`,
         }}>
           LOBBY
         </div>
         <div style={g.sub}>Share the code & wait for friends</div>
-        <div style={{background:C.card2,borderRadius:12,padding:"14px 20px",marginBottom:20,display:"flex",justifyContent:"space-between",alignItems:"center",border:`1px solid ${C.cyan}33`}}>
+        <div style={{background:C.card2,borderRadius:12,padding:"14px 20px",marginBottom:20,display:"flex",justifyContent:"space-between",alignItems:"center",border:`1px solid ${C.muted}33`}}>
           <div>
             <div style={{fontSize:10,color:C.muted,letterSpacing:3,marginBottom:4,fontWeight:600}}>ROOM CODE</div>
-            <div style={{fontSize:42,fontWeight:900,letterSpacing:10,color:C.cyan,fontFamily:"'Space Mono', monospace",animation:"codeGlow 2.5s ease-in-out infinite"}}>{code}</div>
+            <div style={{fontSize:42,fontWeight:700,letterSpacing:8,color:C.text,fontFamily:FONT_MONO}}>{code}</div>
           </div>
-          <button className="gbtn" style={{...g.btnSm,background:copied?C.green:C.accent,color:"#fff",padding:"10px 18px"}} onClick={copy}>{copied?"✓ Copied":"Copy"}</button>
+          <button className="gbtn" style={{...g.btnSm,background:copied?C.green:C.hi,color:copied?"#fff":C.onHi,padding:"10px 18px"}} onClick={copy}>{copied?"✓ Copied":"Copy"}</button>
         </div>
 
 
@@ -1566,8 +1564,8 @@ function Lobby({ gs, pid, code, isHost, startGame, leave, writeGs }) {
                   {options.map(n=>(
                     <button key={n} onClick={()=>onPick(n)} style={{
                       ...g.btnSm, flex:1,
-                      background:current===n?`linear-gradient(135deg, ${C.accent}, ${C.cyan})`:C.card2,
-                      color:current===n?"#fff":C.text,
+                      background:current===n?C.text:C.card2,
+                      color:current===n?C.bg:C.text,
                       border:current===n?"none":`1px solid ${C.muted}44`
                     }}>{n}{hint}</button>
                   ))}
@@ -1645,7 +1643,7 @@ function Lobby({ gs, pid, code, isHost, startGame, leave, writeGs }) {
                     href="https://aistudio.google.com/app/apikey"
                     target="_blank"
                     rel="noreferrer"
-                    style={{color:C.cyan,textDecoration:"underline"}}
+                    style={{color:C.blue,textDecoration:"underline"}}
                   >
                     Google AI Studio
                   </a>
@@ -1680,7 +1678,7 @@ function Lobby({ gs, pid, code, isHost, startGame, leave, writeGs }) {
                     />
                     <div style={{display:"flex",gap:8}}>
                       <button onClick={saveKey}
-                        style={{...g.btnSm,flex:1,background:`linear-gradient(135deg, ${C.accent}, ${C.cyan})`,color:"#fff"}}>
+                        style={{...g.btnSm,flex:1,background:C.hi,color:C.onHi}}>
                         Save
                       </button>
                       <button onClick={()=>{setEditingKey(false);setKeyInput(geminiKey);}}
@@ -1697,8 +1695,8 @@ function Lobby({ gs, pid, code, isHost, startGame, leave, writeGs }) {
                     {GEMINI_MODELS.map(m => (
                       <button key={m.id} onClick={()=>setGeminiModel(m.id)}
                         style={{...g.btnSm,
-                          background:currentModel===m.id?`linear-gradient(135deg, ${C.accent}, ${C.cyan})`:C.card2,
-                          color:currentModel===m.id?"#fff":C.text,
+                          background:currentModel===m.id?C.text:C.card2,
+                          color:currentModel===m.id?C.bg:C.text,
                           border:currentModel===m.id?"none":`1px solid ${C.muted}44`,
                           opacity:isHost?1:0.7,cursor:isHost?"pointer":"default"}}>
                         {m.label}
@@ -1759,8 +1757,8 @@ function Lobby({ gs, pid, code, isHost, startGame, leave, writeGs }) {
           <div key={p.id} style={g.pRow}>
             <span style={{fontWeight:600}}>{p.nickname}</span>
             <div style={{...g.row,gap:6}}>
-              {p.id===gs.host&&<span style={{...g.badge,background:"#f7258522",color:C.accent}}>HOST</span>}
-              {p.id===pid&&<span style={{...g.badge,background:`${C.cyan}22`,color:C.cyan}}>YOU</span>}
+              {p.id===gs.host&&<span style={{...g.badge,background:`${C.accent}22`,color:C.accent}}>HOST</span>}
+              {p.id===pid&&<span style={{...g.badge,background:`${C.blue}22`,color:C.blue}}>YOU</span>}
               {isHost&&p.id!==pid&&(
                 <button onClick={()=>kickPlayer(p.id)}
                   style={{...g.btnSm,background:`${C.accent}18`,color:C.accent,fontSize:11,padding:"4px 10px"}}>
@@ -2157,7 +2155,7 @@ function Submit({ gs, pid, code, apiKey, writeGs, fetchGs, transitioning, transi
 
         {modeChoiceEnabled ? <div role="group" aria-label="Answer mode" style={{display:'flex',gap:8,marginBottom:12}}>
           {(apiKey ? ['giphy','meme'] : ['meme']).map(mode => <button key={mode} type="button" aria-pressed={activeTab === mode}
-            style={{...g.btnSm,flex:1,background:activeTab === mode ? C.accent : C.card2,color:activeTab === mode ? '#fff' : C.text}}
+            style={{...g.btnSm,flex:1,background:activeTab === mode ? C.text : C.card2,color:activeTab === mode ? C.bg : C.text}}
             onClick={() => setChosenMode(mode as 'giphy' | 'meme')}>{mode === 'giphy' ? 'Search GIFs' : 'Create Meme'}</button>)}
         </div> : <div style={{...g.info, fontWeight:700, marginBottom:12}} aria-label="Required answer mode">
           {answerModeLabels[activeTab]} · This question uses one answer mode.
@@ -2178,8 +2176,7 @@ function Submit({ gs, pid, code, apiKey, writeGs, fetchGs, transitioning, transi
                   <div key={gif.id} onClick={() => setSel(gif)}
                     style={{position:"relative",paddingBottom:"100%",borderRadius:8,overflow:"hidden",cursor:"pointer",
                       border:sel?.id===gif.id?`3px solid ${C.accent}`:"3px solid transparent",
-                      boxShadow:sel?.id===gif.id?`0 0 12px ${C.accent}66`:"none",
-                      transition:"border-color 0.15s, box-shadow 0.15s"}}>
+                      transition:"border-color 0.15s"}}>
                     <div style={{position:"absolute",inset:0}}>
                       <GifImg url={gif.previewUrl} lazy style={{width:"100%",height:"100%"}} fit="contain"/>
                     </div>
@@ -2202,7 +2199,7 @@ function Submit({ gs, pid, code, apiKey, writeGs, fetchGs, transitioning, transi
             {sel && (
               <div style={{textAlign:"center",marginBottom:12}}>
                 <div style={{fontSize:10,color:C.muted,letterSpacing:3,marginBottom:6,fontWeight:600}}>SELECTED</div>
-                <GifImg url={sel.previewUrl} style={{width:200,height:150,borderRadius:8,margin:"0 auto",border:`2px solid ${C.accent}`,boxShadow:`0 0 20px ${C.accent}44`}}/>
+                <GifImg url={sel.previewUrl} style={{width:200,height:150,borderRadius:8,margin:"0 auto",border:`2px solid ${C.accent}`}}/>
               </div>
             )}
             <button className="gbtn" style={{...g.btn,...(sel?g.btnP:{background:C.card2,color:C.muted}),cursor:sel?"pointer":"not-allowed",marginBottom:0}}
@@ -2238,8 +2235,8 @@ function Submit({ gs, pid, code, apiKey, writeGs, fetchGs, transitioning, transi
                 {STYLES.map(s => (
                   <button key={s.key} disabled={generating || memeSubmitting} onClick={()=>{ setTextStyle(s.key); setGenImageUrl(null); setGenError(""); }}
                     style={{...g.btnSm,
-                      background:textStyle===s.key?`linear-gradient(135deg, ${C.accent}, ${C.cyan})`:C.card2,
-                      color:textStyle===s.key?"#fff":C.text,
+                      background:textStyle===s.key?C.text:C.card2,
+                      color:textStyle===s.key?C.bg:C.text,
                       border:textStyle===s.key?"none":`1px solid ${C.muted}44`}}>
                     {s.label}
                   </button>
@@ -2251,7 +2248,7 @@ function Submit({ gs, pid, code, apiKey, writeGs, fetchGs, transitioning, transi
                 <div style={{fontSize:10,color:C.muted,letterSpacing:3,marginBottom:6,fontWeight:600}}>GENERATED IMAGE</div>
                 <img src={genImageUrl} alt="AI generated"
                   style={{width:200,height:150,objectFit:"cover",borderRadius:8,margin:"0 auto",display:"block",
-                    border:`2px solid ${C.accent}`,boxShadow:`0 0 20px ${C.accent}44`}}/>
+                    border:`2px solid ${C.accent}`}}/>
               </div>
             )}
             {genError && <div style={g.err}>⚠ {genError}</div>}
@@ -2370,17 +2367,25 @@ function Voting({ gs, pid, code, isHost, fetchGs, writeGs, transitioning, advanc
     const myVoteThis=myVote===side;
     const voteCount=side==="left"?lv:rv;
     const subType = sub?.type || (sub?.url ? "giphy" : null);
+    // Left answer is always the red corner, right is always the blue corner
+    const corner = side==="left" ? C.accent : C.blue;
+    const cornerName = side==="left" ? "RED" : "BLUE";
+    const lost = showRes && !isWinner && !isTie;
     return(
-      <div className="gif-vote-card" style={{display:"flex",flexDirection:"column",alignItems:"center",gap:8,minWidth:0}}>
+      <div className="gif-vote-card" style={{display:"flex",flexDirection:"column",alignItems:"center",gap:8,minWidth:0,
+        opacity:lost?0.45:1,transition:"opacity 0.3s ease, transform 0.18s ease"}}>
         {(() => {
           const frame = (
-            <div style={{borderRadius:12,overflow:"hidden",width:"100%",position:"relative",
-              border:showRes?isWinner?`3px solid ${C.green}`:isTie?`3px solid ${C.yellow}`:"3px solid transparent"
-                :myVoteThis?`3px solid ${C.accent}`:canVote?`3px solid ${C.muted}44`:"3px solid transparent",
-              boxShadow:showRes&&isWinner?`0 0 24px ${C.green}55`:myVoteThis?`0 0 16px ${C.accent}44`:"none",
-              transition:"border-color 0.2s, box-shadow 0.2s"}}>
+            <div style={{borderRadius:10,overflow:"hidden",width:"100%",position:"relative",
+              border:`3px solid ${isTie?C.yellow:showRes||myVoteThis?corner:`${corner}66`}`,
+              transition:"border-color 0.2s"}}>
+              <div style={{position:"absolute",top:0,[side==="left"?"left":"right"]:0,zIndex:1,background:corner,color:"#fff",
+                fontFamily:FONT_DISPLAY,fontWeight:800,fontSize:14,letterSpacing:1.5,padding:"3px 10px",
+                borderBottomRightRadius:side==="left"?8:0,borderBottomLeftRadius:side==="left"?0:8}}>
+                {cornerName} CORNER
+              </div>
               {subType === "text"
-                ? <div className="vote-gif" style={{background:`linear-gradient(135deg, ${C.accent}22, ${C.cyan}18)`,
+                ? <div className="vote-gif" style={{background:`${corner}14`,
                     display:"flex",alignItems:"center",justifyContent:"center",padding:"16px"}}>
                     <div style={{fontSize:"clamp(17px, 2.2vw, 26px)",fontWeight:700,textAlign:"center",color:C.text,lineHeight:1.4,fontStyle:"italic"}}>
                       "{sub.textAnswer}"
@@ -2390,8 +2395,8 @@ function Voting({ gs, pid, code, isHost, fetchGs, writeGs, transitioning, advanc
                 ? <div style={{position:"relative"}}>
                     <img src={sub.url} alt="AI generated" className="vote-gif"
                       style={{width:"100%",objectFit:"contain",display:"block",background:C.card2}}/>
-                    <div style={{position:"absolute",top:6,right:6,background:`${C.bg}cc`,
-                      borderRadius:6,padding:"2px 6px",fontSize:10,color:C.cyan,fontWeight:700,letterSpacing:1}}>
+                    <div style={{position:"absolute",bottom:6,[side==="left"?"right":"left"]:6,background:`${C.bg}cc`,
+                      borderRadius:6,padding:"2px 6px",fontSize:10,color:C.text,fontWeight:700,letterSpacing:1}}>
                       ✨ AI
                     </div>
                   </div>
@@ -2399,15 +2404,15 @@ function Voting({ gs, pid, code, isHost, fetchGs, writeGs, transitioning, advanc
                 ? <GifImg className="vote-gif" url={sub.url} fit="contain" style={{width:"100%"}}/>
                 : <div className="vote-gif" style={{background:C.card2,display:"flex",alignItems:"center",justifyContent:"center",color:C.muted}}>No submission</div>}
               {canVote && (
-                <div style={{background:C.accent,color:"#fff",fontWeight:700,fontSize:15,letterSpacing:1,padding:"10px 0"}}>
-                  {side==="left"?"← VOTE":"VOTE →"}
+                <div style={{background:corner,color:"#fff",fontFamily:FONT_DISPLAY,fontWeight:800,fontSize:20,letterSpacing:1.5,padding:"8px 0"}}>
+                  VOTE {cornerName}
                 </div>
               )}
             </div>
           );
           return canVote
-            ? <button type="button" className="vote-pick" aria-label={`Vote for the ${side} answer`}
-                style={{color:C.accent}} onClick={()=>vote(side)}>{frame}</button>
+            ? <button type="button" className="vote-pick" aria-label={`Vote for the ${side} answer (${cornerName.toLowerCase()} corner)`}
+                style={{color:corner}} onClick={()=>vote(side)}>{frame}</button>
             : frame;
         })()}
         <MediaAttribution source={submissionSource(sub)} attribution={sub?.attribution} license={sub?.license}/>
@@ -2418,7 +2423,7 @@ function Voting({ gs, pid, code, isHost, fetchGs, writeGs, transitioning, advanc
           </div>
         )}
         {showRes&&(
-          <div style={{fontWeight:900,fontSize:18,fontFamily:"'Bebas Neue', sans-serif",letterSpacing:1,color:isWinner?C.green:isTie?C.yellow:C.muted}}>
+          <div style={{fontWeight:800,fontSize:24,fontFamily:FONT_DISPLAY,letterSpacing:1,color:isWinner?corner:isTie?C.yellow:C.muted}}>
             {voteCount} {voteCount!==1?"VOTES":"VOTE"}{isWinner?" 🏆":isTie?" 🤝":""}
           </div>
         )}
@@ -2447,18 +2452,19 @@ function Voting({ gs, pid, code, isHost, fetchGs, writeGs, transitioning, advanc
         <div style={{...g.prompt,fontSize:"clamp(18px, 2vw, 26px)",padding:"10px 0 14px"}}>"{currentPrompt}"</div>
         <div className="vote-grid" style={{display:"grid",gap:16,alignItems:"start",marginBottom:12}}>
           <GifCard sub={lSub} id={lId} side="left"/>
-          <div className="vote-vs" style={{display:"flex",alignItems:"center",justifyContent:"center",alignSelf:"center",
-            fontSize:38,fontFamily:"'Bebas Neue', sans-serif",letterSpacing:2,color:C.accent,
-            animation:"vsPulse 1.8s ease-in-out infinite"}}>
-            VS
+          <div style={{display:"flex",justifyContent:"center",alignSelf:"center"}}>
+            <div className="vote-vs" style={{fontSize:34,fontFamily:FONT_DISPLAY,fontWeight:800,letterSpacing:1,lineHeight:1,
+              background:C.hi,color:C.onHi,padding:"6px 10px 4px",borderRadius:4,transform:"rotate(-4deg)"}}>
+              VS
+            </div>
           </div>
           <GifCard sub={rSub} id={rId} side="right"/>
         </div>
 
         <div style={{textAlign:"center",color:C.muted,fontSize:13,marginTop:8}}>
-          {showRes?(lv>rv?"Left wins! ✨":rv>lv?"Right wins! ✨":"Tie! Both get a point 🤝")+" Next up soon…"
-            :inMatchup?"Your GIF is in this matchup — sit tight!"
-            :myVote?"Vote cast! Waiting for timer…":"Vote for the funnier GIF!"}
+          {showRes?(lv>rv?"Red corner wins.":rv>lv?"Blue corner wins.":"Tie. Both get a point.")+" Next matchup soon…"
+            :inMatchup?"Your answer is in this matchup. Others are voting."
+            :myVote?"Vote cast. Waiting for the timer…":"Tap the funnier answer to vote."}
         </div>
       </div>
     </div>
@@ -2644,25 +2650,25 @@ function GameOver({ gs, writeGs, pid, runEndGameCleanup }) {
   <title>GIF Battles Results ${escapeHtml(gs.code || "")}</title>
   <style>
     :root { color-scheme: dark; }
-    body { margin: 0; padding: 28px; background: #0b0b17; color: #ececff; font-family: "DM Sans", system-ui, -apple-system, sans-serif; }
+    body { margin: 0; padding: 28px; background: #14120F; color: #F2EDE4; font-family: "DM Sans", system-ui, -apple-system, sans-serif; }
     h1 { margin: 0 0 8px; font-size: 42px; letter-spacing: 1px; }
     h2 { margin: 18px 0 8px; font-size: 20px; }
-    .sub { color: #9aa0d1; margin-bottom: 12px; }
-    .block { background: #15152c; border: 1px solid #3a3a6f44; border-radius: 14px; padding: 14px; margin-bottom: 16px; }
+    .sub { color: #8A8278; margin-bottom: 12px; }
+    .block { background: #1D1A16; border: 1px solid #8A827833; border-radius: 14px; padding: 14px; margin-bottom: 16px; }
     table { width: 100%; border-collapse: collapse; }
-    th, td { text-align: left; padding: 8px; border-bottom: 1px solid #3a3a6f44; }
-    .round { background: #101028; border: 1px solid #3a3a6f33; border-radius: 12px; padding: 12px; margin-bottom: 10px; }
-    .meta { font-size: 12px; color: #9aa0d1; letter-spacing: 1px; margin-bottom: 6px; }
+    th, td { text-align: left; padding: 8px; border-bottom: 1px solid #8A827833; }
+    .round { background: #28241F; border: 1px solid #8A827833; border-radius: 12px; padding: 12px; margin-bottom: 10px; }
+    .meta { font-size: 12px; color: #8A8278; letter-spacing: 1px; margin-bottom: 6px; }
     .round h3 { margin: 0 0 10px; font-size: 17px; font-style: italic; }
     .grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
-    .card { background: #181834; border: 1px solid #3a3a6f33; border-radius: 10px; padding: 8px; }
-    .name { font-size: 11px; letter-spacing: 1px; color: #9aa0d1; font-weight: 700; margin-bottom: 6px; text-transform: uppercase; }
-    .image-wrap { position: relative; height: 220px; border-radius: 6px; background: #101028; display: flex; align-items: center; justify-content: center; overflow: hidden; }
-    img { max-width: 100%; max-height: 100%; width: auto; height: auto; object-fit: contain; display: block; background: #101028; }
-    .badge { position: absolute; top: 6px; right: 6px; background: rgba(0,0,0,0.75); color: #8fe8ff; border: 1px solid #8fe8ff55; border-radius: 4px; font-size: 10px; font-weight: 700; padding: 1px 5px; }
-    .text-answer { min-height: 220px; border-radius: 6px; display: flex; align-items: center; justify-content: center; text-align: center; padding: 12px; background: linear-gradient(135deg, #ff297922, #00e5ff1a); border: 1px solid #ff297944; }
-    .caption { font-size: 12px; color: #9aa0d1; margin-top: 6px; font-style: italic; text-align: center; }
-    .missing { height: 220px; border-radius: 6px; display: flex; align-items: center; justify-content: center; color: #9aa0d1; background: #101028; }
+    .card { background: #1D1A16; border: 1px solid #8A827833; border-radius: 10px; padding: 8px; }
+    .name { font-size: 11px; letter-spacing: 1px; color: #8A8278; font-weight: 700; margin-bottom: 6px; text-transform: uppercase; }
+    .image-wrap { position: relative; height: 220px; border-radius: 6px; background: #28241F; display: flex; align-items: center; justify-content: center; overflow: hidden; }
+    img { max-width: 100%; max-height: 100%; width: auto; height: auto; object-fit: contain; display: block; background: #28241F; }
+    .badge { position: absolute; top: 6px; right: 6px; background: rgba(0,0,0,0.75); color: #F2EDE4; border: 1px solid #8A827866; border-radius: 4px; font-size: 10px; font-weight: 700; padding: 1px 5px; }
+    .text-answer { min-height: 220px; border-radius: 6px; display: flex; align-items: center; justify-content: center; text-align: center; padding: 12px; background: #28241F; border: 1px solid #8A827833; }
+    .caption { font-size: 12px; color: #8A8278; margin-top: 6px; font-style: italic; text-align: center; }
+    .missing { height: 220px; border-radius: 6px; display: flex; align-items: center; justify-content: center; color: #8A8278; background: #28241F; }
     @media (max-width: 860px) { .grid { grid-template-columns: 1fr; } }
   </style>
 </head>
@@ -2717,9 +2723,7 @@ function GameOver({ gs, writeGs, pid, runEndGameCleanup }) {
       <div className="game-card" style={{...g.wCard,maxWidth:1100}}>
         <div style={{textAlign:"center",marginBottom:24}}>
           <div style={{fontSize:56,marginBottom:4}}>🎊</div>
-          <div style={{fontSize:80,fontWeight:900,fontFamily:"'Bebas Neue', sans-serif",letterSpacing:4,
-            background:`linear-gradient(135deg, ${C.yellow}, ${C.accent} 50%, ${C.yellow})`,
-            WebkitBackgroundClip:"text",WebkitTextFillColor:"transparent",lineHeight:1,marginBottom:8}}>
+          <div style={{fontSize:88,fontWeight:800,fontFamily:FONT_DISPLAY,letterSpacing:1,color:C.text,lineHeight:0.9,marginBottom:10}}>
             GAME OVER
           </div>
           <div style={{fontSize:20,fontWeight:700,color:C.yellow}}>
@@ -2731,13 +2735,13 @@ function GameOver({ gs, writeGs, pid, runEndGameCleanup }) {
             <div key={p.id} style={{...g.pRow,
               background:i===0?`${C.accent}12`:C.card2,
               borderLeft:i===0?`3px solid ${C.accent}`:"3px solid transparent",
-              boxShadow:i===0?`inset 0 0 30px ${C.accent}08`:"none"}}>
+}}>
               <div style={g.row}>
                 <span style={{fontSize:22}}>{medals[i]||"🎖"}</span>
                 <span style={{fontWeight:i===0?800:500,fontSize:i===0?16:15}}>{p.nickname}</span>
-                {p.id===pid&&<span style={{...g.badge,background:`${C.cyan}18`,color:C.cyan}}>YOU</span>}
+                {p.id===pid&&<span style={{...g.badge,background:`${C.blue}18`,color:C.blue}}>YOU</span>}
               </div>
-              <span style={{fontWeight:900,fontSize:i===0?20:15,fontFamily:"'Space Mono', monospace",color:i===0?C.accent:C.text}}>{p.score}</span>
+              <span style={{fontWeight:900,fontSize:i===0?20:15,fontFamily:FONT_MONO,color:i===0?C.accent:C.text}}>{p.score}</span>
             </div>
           ))}
         </div>
@@ -2763,7 +2767,7 @@ function GameOver({ gs, writeGs, pid, runEndGameCleanup }) {
                     <div key={`${row.idx}-${playerId}`} style={{background:C.card,borderRadius:8,padding:"8px",border:`1px solid ${C.muted}22`}}>
                       <div style={{fontSize:11,fontWeight:700,marginBottom:6,color:C.muted,letterSpacing:1}}>{nick.toUpperCase()}</div>
                       {sub?.type === "text"
-                        ? <div style={{height:summaryMediaHeight,background:`linear-gradient(135deg, ${C.accent}18, ${C.cyan}12)`,borderRadius:6,
+                        ? <div style={{height:summaryMediaHeight,background:C.card2,borderRadius:6,
                             display:"flex",alignItems:"center",justifyContent:"center",padding:10,
                             border:`1px solid ${C.accent}22`}}>
                             <div style={{fontSize:13,fontWeight:600,color:C.text,textAlign:"center",fontStyle:"italic",lineHeight:1.4}}>
@@ -2775,7 +2779,7 @@ function GameOver({ gs, writeGs, pid, runEndGameCleanup }) {
                             <div style={{position:"relative",height:summaryMediaHeight,background:C.bg,borderRadius:6,display:"flex",alignItems:"center",justifyContent:"center",overflow:"hidden"}}>
                               <img src={sub.url} alt="AI" style={{maxWidth:"100%",maxHeight:"100%",objectFit:"contain",borderRadius:6,display:"block"}}/>
                               <div style={{position:"absolute",top:4,right:4,background:`${C.bg}cc`,borderRadius:4,
-                                padding:"1px 5px",fontSize:9,color:C.cyan,fontWeight:700,letterSpacing:1}}>✨ AI</div>
+                                padding:"1px 5px",fontSize:9,color:C.blue,fontWeight:700,letterSpacing:1}}>✨ AI</div>
                             </div>
                             {sub.textAnswer && (
                               <div style={{fontSize:10,color:C.muted,marginTop:4,fontStyle:"italic",textAlign:"center",
@@ -2819,11 +2823,11 @@ function Scoreboard({players,highlightIds=[]}){
           background:highlightIds.includes(p.id)?`${C.yellow}14`:C.card2,
           borderLeft:highlightIds.includes(p.id)?`2px solid ${C.yellow}`:"2px solid transparent"}}>
           <div style={{...g.row,gap:8}}>
-            <span style={{fontFamily:"'Space Mono', monospace",color:i===0?C.accent:C.muted,width:22,fontSize:12,fontWeight:700}}>{i+1}</span>
+            <span style={{fontFamily:FONT_MONO,color:i===0?C.accent:C.muted,width:22,fontSize:12,fontWeight:700}}>{i+1}</span>
             <span style={{fontWeight:i===0?700:500}}>{p.nickname}</span>
             {highlightIds.includes(p.id)&&<span style={{fontSize:12}}>⭐</span>}
           </div>
-          <span style={{fontWeight:800,fontFamily:"'Space Mono', monospace",fontSize:14,color:i===0?C.accent:C.text}}>{p.score}</span>
+          <span style={{fontWeight:800,fontFamily:FONT_MONO,fontSize:14,color:i===0?C.accent:C.text}}>{p.score}</span>
         </div>
       ))}
     </div>
