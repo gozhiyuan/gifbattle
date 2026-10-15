@@ -1,0 +1,14 @@
+{
+  "prompts": [
+    { "id": "original-cat-waiting-001", "prompt": "A realistic expressive ginger cat staring impatiently at an empty food bowl as though dinner is five minutes late. Clear face, simple background, space for captions." },
+    { "id": "original-dog-suspicious-001", "prompt": "A realistic fluffy dog giving an exaggerated suspicious side eye to an unattended sandwich. Comedic mood, simple background, space below for captions." },
+    { "id": "original-cat-shocked-001", "prompt": "A realistic surprised cat with enormous eyes looking at a tiny overturned flowerpot and a dramatically oversized pile of soil. Funny startled reaction, no writing." },
+    { "id": "original-dog-celebration-001", "prompt": "A small realistic puppy proudly sitting next to an enormous tennis ball with a triumphant expression. Bright simple scene, room below for captions." },
+    { "id": "original-raccoon-panic-001", "prompt": "A realistic raccoon frozen in panic beside a tower of wobbling empty cardboard boxes. Expressive animal reaction, absurd harmless mess, no text." },
+    { "id": "original-cat-nope-001", "prompt": "A realistic cat leaning away in theatrical disgust from a cucumber on a dinner plate. Exaggerated funny expression, simple background, caption space below." },
+    { "id": "original-dog-awkward-001", "prompt": "A realistic dog squeezed into a comically small empty cardboard box, looking embarrassed but comfortable. Expressive face, uncluttered background, no logos." },
+    { "id": "original-duck-confused-001", "prompt": "A realistic duck staring in confusion at a single rubber duck in a puddle. Absurd friendly visual joke, clear reaction, simple composition and caption space." },
+    { "id": "original-cat-disappointment-001", "prompt": "A realistic dramatically disappointed cat beside a giant empty treat jar containing exactly one tiny crumb. Face fully visible, clear simple scene, no text." },
+    { "id": "original-dog-facepalm-001", "prompt": "A realistic sleepy dog with one paw covering its eyes beside a tangled pile of colorful leash straps. A relatable exhausted reaction, no visible brands, space for captions." }
+  ]
+}

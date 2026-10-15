@@ -36,8 +36,8 @@ export default function OpengraphImage() {
             color: "rgb(223, 229, 255)",
           }}
         >
-          Multiplayer party game: pick GIFs, vote for the funniest, win the
-          room.
+          Find funny GIFs, create your own memes, and vote for the funniest
+          answer.
         </div>
         <div
           style={{

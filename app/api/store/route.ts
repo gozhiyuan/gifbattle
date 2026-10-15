@@ -8,7 +8,7 @@ import {
 
 const redis = Redis.fromEnv();
 const READ_PREFIXES = ["gifbattle:room:", "gifbattle:vote:", "gifbattle:hb:"];
-const WRITE_PREFIXES = ["gifbattle:vote:", "gifbattle:hb:"];
+const WRITE_PREFIXES = ["gifbattle:vote:"];
 const isAllowedReadKey = (key: string) => READ_PREFIXES.some((prefix) => key.startsWith(prefix));
 const isAllowedWriteKey = (key: string) => WRITE_PREFIXES.some((prefix) => key.startsWith(prefix));
 const ROOM_PREFIX = "gifbattle:room:";

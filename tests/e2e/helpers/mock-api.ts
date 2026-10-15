@@ -221,6 +221,7 @@ export const installGameApiMocks = async (
   store: Map<string, string>
 ) => {
   const roomTokens = new Map<string, string>();
+  await context.route('**/api/media/events', route => json(route, 200, { ok: true }));
   await context.route(`**${STORE_PATH}**`, (route, request) =>
     handleStoreRequest(route, request, store)
   );
@@ -230,6 +231,24 @@ export const installGameApiMocks = async (
   await context.route(`**${CLEANUP_PATH}**`, (route) =>
     json(route, 200, { ok: true, deleted: 0 })
   );
+  await context.route('**/api/room/host-presence', (route,request) => {
+    const body=request.postDataJSON();
+    if(roomTokens.get(`${body.code}:${body.pid}`)!==body.token)return json(route,403,{error:'forbidden'});
+    const key=`gifbattle:room:${body.code}`,raw=store.get(key);if(!raw)return json(route,404,{error:'room_not_found'});
+    const room=JSON.parse(raw);if(!room.players.some(player=>player.id===body.pid))return json(route,403,{error:'forbidden'});
+    if(room.phase==='game_over')return json(route,200,{ok:true,migrated:false});
+    if(body.action==='heartbeat'){
+      if(room.host!==body.pid)return json(route,403,{error:'forbidden'});
+      store.set(`gifbattle:hb:${body.code}`,JSON.stringify({pid:body.pid,ts:Date.now()}));return json(route,200,{ok:true});
+    }
+    if(room.host!==body.expectedHost)return json(route,200,{ok:true,migrated:false});
+    let hb;try{hb=JSON.parse(store.get(`gifbattle:hb:${body.code}`)||'null');}catch{}
+    const grace=room.phase==='lobby'?120000:40000;
+    const last=hb?.pid===room.host?hb.ts:room.hostSince||room.createdAt||Date.now();
+    if(Date.now()-last<grace)return json(route,200,{ok:true,migrated:false});
+    room.host=body.pid;room.hostSince=Date.now();store.set(key,JSON.stringify(room));
+    store.set(`gifbattle:hb:${body.code}`,JSON.stringify({pid:body.pid,ts:Date.now()}));return json(route,200,{ok:true,migrated:true});
+  });
   await context.route(`**/api/room/create**`, (route, request) =>
     handleRoomCreateRequest(route, request, store, roomTokens)
   );

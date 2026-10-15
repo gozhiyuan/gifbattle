@@ -1,0 +1,23 @@
+{
+  "version": 1,
+  "candidates": [
+    {
+      "id": "cat-empty-bowl-001",
+      "title": "Cat waiting for dinner",
+      "description": "A cat staring at an empty bowl",
+      "localFile": "media-work/originals/cat-empty-bowl.jpg",
+      "sourceUrl": "https://example.com/original-source",
+      "creator": "REPLACE WITH CREATOR",
+      "license": "REPLACE WITH LICENSE",
+      "licenseUrl": "https://example.com/license",
+      "permissionRecord": "",
+      "attribution": { "label": "REPLACE WITH REQUIRED CREDIT", "url": "https://example.com/original-source" },
+      "categories": ["waiting", "disappointment"],
+      "tags": ["cat", "hungry", "impatient", "empty"],
+      "captionable": true,
+      "captionLayout": "top-bottom",
+      "captionMaxLength": 120,
+      "reviewStatus": "pending"
+    }
+  ]
+}

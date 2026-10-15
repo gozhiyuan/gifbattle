@@ -20,3 +20,12 @@ yarn-error.log*
 playwright-report/
 test-results/
 blob-report/
+
+# Offline media curation: originals, candidates and permission documents
+media-work/
+.vercel
+.env*
+!.env.example
+
+# TypeScript incremental build cache
+*.tsbuildinfo

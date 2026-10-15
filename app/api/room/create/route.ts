@@ -41,6 +41,8 @@ export async function POST(req: NextRequest) {
     const roomState = {
       phase: "lobby",
       host: pid,
+      createdAt: Date.now(),
+      hostSince: Date.now(),
       code,
       players: [{ id: pid, nickname: nickname.trim(), score: 0 }],
       prompts: [],
@@ -58,6 +60,7 @@ export async function POST(req: NextRequest) {
       submitSecs: 60,
       voteSecs: 12,
       rounds: 3,
+      alternateModes: true,
       namePromptRounds: 1,
       customPrompts: [],
     };
